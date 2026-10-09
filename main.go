@@ -15,6 +15,9 @@ import (
 	"github.com/XSAM/otelsql"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -252,7 +255,7 @@ func main() {
 		}
 	}()
 
-	dsn := "host=db port=5432 user=postgres password=postgres dbname=postgres sslmode=disable"
+	dsn := "host=postgres port=5432 user=postgres password=postgres dbname=postgres sslmode=disable"
 
 	db, err := otelsql.Open("pgx", dsn)
 	if err != nil {
@@ -289,13 +292,28 @@ func main() {
 		log.Fatal(err)
 	}
 
+	reg := prometheus.NewRegistry()
+	goCollector := collectors.NewGoCollector()
+	processCollector := collectors.NewProcessCollector(collectors.ProcessCollectorOpts{})
+	reg.MustRegister(goCollector, processCollector)
+	appMetrics := NewMetrics(reg)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /payments", server.createPayment)
 	mux.HandleFunc("GET /payments/{id}", server.getPaymentHandler)
 
+	handler := contentJSON(mux)
+	handler = otelhttp.NewHandler(handler, "http.server")
+	handler = promhttp.InstrumentHandlerCounter(appMetrics.HTTPRequestsTotal, handler)
+	handler = promhttp.InstrumentHandlerDuration(appMetrics.HTTPRequestDuration, handler)
+
+	rootMux := http.NewServeMux()
+	rootMux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	rootMux.Handle("/", handler)
+
 	logger.Info("starting HTTP server", "port", 8080)
 
-	if err := http.ListenAndServe(":8080", otelhttp.NewHandler(contentJSON(mux), "http.server")); err != nil {
+	if err := http.ListenAndServe(":8080", rootMux); err != nil {
 		logger.Error("server stopped", "error", err)
 		os.Exit(1)
 	}

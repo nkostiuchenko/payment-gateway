@@ -3,19 +3,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: api
     env_file:
       - .env
     ports:
       - "8080:8080"
     restart: unless-stopped
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
 
-  db:
+  postgres:
     image: postgres:17
-    container_name: db
     environment:
       POSTGRES_USER: ${POSTGRES_USERNAME:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -32,7 +30,6 @@ services:
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:9.5.5
-    container_name: elasticsearch
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -52,7 +49,6 @@ services:
 
   kibana:
     image: docker.elastic.co/kibana/kibana:9.5.5
-    container_name: kibana
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     ports:
@@ -64,7 +60,6 @@ services:
 
   filebeat:
     image: docker.elastic.co/beats/filebeat:9.5.5
-    container_name: filebeat
     user: root
     command: ["-e", "--strict.perms=false"]
     volumes:
@@ -79,13 +74,37 @@ services:
 
   jaeger:
     image: jaegertracing/jaeger:2.10.0
-    container_name: jaeger
     ports:
       - "16686:16686"
       - "4317:4317"
       - "4318:4318"
 
+  prometheus:
+    image: prom/prometheus:v3.8.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
 volumes:
   pgdata:
   esdata:
   filebeatdata:
+  prometheus-data:
+  grafana_data:
