@@ -77,6 +77,14 @@ services:
       elasticsearch:
         condition: service_healthy
 
+  jaeger:
+    image: jaegertracing/jaeger:2.10.0
+    container_name: jaeger
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+
 volumes:
   pgdata:
   esdata:

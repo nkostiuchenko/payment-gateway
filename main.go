@@ -12,8 +12,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/XSAM/otelsql"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 var (
@@ -233,7 +235,26 @@ func contentJSON(next http.Handler) http.Handler {
 }
 
 func main() {
-	db, err := sql.Open("pgx", "host=db port=5432 user=postgres password=postgres dbname=postgres sslmode=disable")
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	shutdownTracing, err := initTracing(context.Background())
+	if err != nil {
+		logger.Error("otel setup failed", "error", err)
+		os.Exit(1)
+	}
+
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := shutdownTracing(ctx); err != nil {
+			logger.Error("otel shutdown failed", "error", err)
+		}
+	}()
+
+	dsn := "host=db port=5432 user=postgres password=postgres dbname=postgres sslmode=disable"
+
+	db, err := otelsql.Open("pgx", dsn)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -261,8 +282,6 @@ func main() {
 	);
 	`)
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-
 	store := NewPostgresStore(db)
 
 	server, err := NewServer(logger, store)
@@ -276,7 +295,7 @@ func main() {
 
 	logger.Info("starting HTTP server", "port", 8080)
 
-	if err := http.ListenAndServe(":8080", contentJSON(mux)); err != nil {
+	if err := http.ListenAndServe(":8080", otelhttp.NewHandler(contentJSON(mux), "http.server")); err != nil {
 		logger.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
