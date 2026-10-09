@@ -1,0 +1,40 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries and coverage
+*.test
+*.out
+
+# Build artifacts
+build/
+dist/
+tmp/
+
+# Go workspace / deps
+go.work
+vendor/
+
+# Local env/config
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Tooling
+.air.toml
+.task
+node_modules/
