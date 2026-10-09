@@ -233,7 +233,7 @@ func contentJSON(next http.Handler) http.Handler {
 }
 
 func main() {
-	db, err := sql.Open("pgx", "host=localhost port=5432 user=postgres password=postgres dbname=postgres sslmode=disable")
+	db, err := sql.Open("pgx", "host=db port=5432 user=postgres password=postgres dbname=postgres sslmode=disable")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -274,7 +274,10 @@ func main() {
 	mux.HandleFunc("POST /payments", server.createPayment)
 	mux.HandleFunc("GET /payments/{id}", server.getPaymentHandler)
 
-	if err := http.ListenAndServe(":8000", contentJSON(mux)); err != nil {
-		log.Fatal(err)
+	logger.Info("starting HTTP server", "port", 8080)
+
+	if err := http.ListenAndServe(":8080", contentJSON(mux)); err != nil {
+		logger.Error("server stopped", "error", err)
+		os.Exit(1)
 	}
 }
