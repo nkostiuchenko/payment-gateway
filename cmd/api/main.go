@@ -12,6 +12,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/nkostiuchenko/payment-gateway/internal/config"
 	"github.com/nkostiuchenko/payment-gateway/internal/metrics"
 	"github.com/nkostiuchenko/payment-gateway/internal/telemetry"
 
@@ -243,6 +244,12 @@ func contentJSON(next http.Handler) http.Handler {
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Error("failed load config", "error", err)
+		os.Exit(1)
+	}
+
 	shutdownTracing, err := telemetry.InitTracing(context.Background())
 	if err != nil {
 		logger.Error("otel setup failed", "error", err)
@@ -258,9 +265,7 @@ func main() {
 		}
 	}()
 
-	dsn := "host=postgres port=5432 user=postgres password=postgres dbname=postgres sslmode=disable"
-
-	db, err := otelsql.Open("pgx", dsn)
+	db, err := otelsql.Open("pgx", cfg.DatabaseURL)
 	if err != nil {
 		log.Fatal(err)
 	}
