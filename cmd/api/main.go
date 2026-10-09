@@ -12,6 +12,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/nkostiuchenko/payment-gateway/internal/metrics"
+	"github.com/nkostiuchenko/payment-gateway/internal/telemetry"
+
 	"github.com/XSAM/otelsql"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -240,7 +243,7 @@ func contentJSON(next http.Handler) http.Handler {
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	shutdownTracing, err := initTracing(context.Background())
+	shutdownTracing, err := telemetry.InitTracing(context.Background())
 	if err != nil {
 		logger.Error("otel setup failed", "error", err)
 		os.Exit(1)
@@ -296,7 +299,7 @@ func main() {
 	goCollector := collectors.NewGoCollector()
 	processCollector := collectors.NewProcessCollector(collectors.ProcessCollectorOpts{})
 	reg.MustRegister(goCollector, processCollector)
-	appMetrics := NewMetrics(reg)
+	appMetrics := metrics.NewMetrics(reg)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /payments", server.createPayment)

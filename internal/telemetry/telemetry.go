@@ -1,4 +1,4 @@
-package main
+package telemetry
 
 import (
 	"context"
@@ -17,7 +17,9 @@ const (
 	appName = "payment-service"
 )
 
-func initTracing(ctx context.Context) (func(context.Context) error, error) {
+var Tracer = otel.Tracer(appName)
+
+func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 	exporter, err := otlptracehttp.New(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("create OTLP exporter: %w", err)
@@ -49,9 +51,7 @@ func initTracing(ctx context.Context) (func(context.Context) error, error) {
 	return func(ctx context.Context) error { return tp.Shutdown(ctx) }, nil
 }
 
-var tracer = otel.Tracer(appName)
-
-func tracingShutdown(shutdown func(context.Context) error) error {
+func TracingShutdown(shutdown func(context.Context) error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return shutdown(ctx)
