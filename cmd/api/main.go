@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -241,19 +240,17 @@ func contentJSON(next http.Handler) http.Handler {
 	})
 }
 
-func main() {
+func run() error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 	cfg, err := config.Load()
 	if err != nil {
-		logger.Error("failed load config", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed load config: %w", err)
 	}
 
 	shutdownTracing, err := telemetry.InitTracing(context.Background())
 	if err != nil {
-		logger.Error("otel setup failed", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("otel setup failed: %w", err)
 	}
 
 	defer func() {
@@ -267,12 +264,18 @@ func main() {
 
 	db, err := otelsql.Open("pgx", cfg.DatabaseURL)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("db connection failed: %w", err)
 	}
 
 	if err := db.Ping(); err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("db ping failed: %w", err)
 	}
+
+	defer func() {
+		if err := db.Close(); err != nil {
+			logger.Error("db close failed", "error", err)
+		}
+	}()
 
 	db.Exec(`
 	CREATE TABLE IF NOT EXISTS payments (
@@ -297,7 +300,7 @@ func main() {
 
 	server, err := NewServer(logger, store)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("server creation failed: %w", err)
 	}
 
 	reg := prometheus.NewRegistry()
@@ -322,7 +325,15 @@ func main() {
 	logger.Info("starting HTTP server", "port", 8080)
 
 	if err := http.ListenAndServe(":8080", rootMux); err != nil {
-		logger.Error("server stopped", "error", err)
+		return fmt.Errorf("server stopped: %w", err)
+	}
+
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("applicaiton failed", "error", err)
 		os.Exit(1)
 	}
 }
