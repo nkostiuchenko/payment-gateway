@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,183 +10,72 @@ import (
 	"os"
 	"time"
 
-	"github.com/nkostiuchenko/payment-gateway/internal/config"
-	"github.com/nkostiuchenko/payment-gateway/internal/metrics"
-	"github.com/nkostiuchenko/payment-gateway/internal/telemetry"
-
 	"github.com/XSAM/otelsql"
-	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
+	"github.com/nkostiuchenko/payment-gateway/internal/config"
+	"github.com/nkostiuchenko/payment-gateway/internal/dto"
+	"github.com/nkostiuchenko/payment-gateway/internal/metrics"
+	"github.com/nkostiuchenko/payment-gateway/internal/model"
+	"github.com/nkostiuchenko/payment-gateway/internal/repository"
+	"github.com/nkostiuchenko/payment-gateway/internal/service"
+	"github.com/nkostiuchenko/payment-gateway/internal/telemetry"
 )
 
-var (
-	ErrNotFound = errors.New("not found")
-)
-
-type ErrorResponse struct {
-	Error string `json:"error"`
-}
-
-type Payment struct {
-	ID        string    `json:"id"`
-	Amount    float64   `json:"amount"`
-	Provider  string    `json:"provider"`
-	Status    string    `json:"status"`
-	Metadata  any       `json:"metadata"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-type Store interface {
-	GetByID(id string) (Payment, error)
-	Create(Payment) (string, error)
-}
-
-type PostgresStore struct {
-	db *sql.DB
-}
-
-func (p *PostgresStore) GetByID(id string) (Payment, error) {
-	const op = "PostgresStore.GetByID"
-
-	const query = `
-	SELECT id, amount, provider, status, metadata, created_at, updated_at
-	FROM payments
-	WHERE id = $1
-	`
-
-	row := p.db.QueryRow(query, id)
-
-	var payment Payment
-	var metadata []byte
-
-	err := row.Scan(
-		&payment.ID,
-		&payment.Amount,
-		&payment.Provider,
-		&payment.Status,
-		&metadata,
-		&payment.CreatedAt,
-		&payment.UpdatedAt,
-	)
-
-	if errors.Is(err, sql.ErrNoRows) {
-		return Payment{}, fmt.Errorf("%s: %w", op, ErrNotFound)
-	}
-
-	if err != nil {
-		return Payment{}, fmt.Errorf("%s: %w", op, err)
-	}
-
-	if err := json.Unmarshal(metadata, &payment.Metadata); err != nil {
-		return Payment{}, fmt.Errorf("%s: %w", op, err)
-	}
-
-	return payment, nil
-}
-
-func (p *PostgresStore) Create(payment Payment) (string, error) {
-	const op = "PostgresStore.Save"
-
-	payment.Status = "NEW"
-
-	tx, err := p.db.BeginTx(context.Background(), nil)
-	defer tx.Rollback()
-
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", op, err)
-	}
-
-	const paymentsQuery = `
-	INSERT INTO payments (amount, provider, status, metadata)
-	VALUES ($1, $2, $3, $4)
-	RETURNING id;
-	`
-
-	row := tx.QueryRow(
-		paymentsQuery,
-		payment.Amount,
-		payment.Provider,
-		payment.Status,
-		payment.Metadata,
-	)
-
-	var paymentID string
-	if err := row.Scan(&paymentID); err != nil {
-		return "", fmt.Errorf("%s: %w", op, err)
-	}
-
-	const eventsQuery = `
-	INSERT INTO payment_events (payment_id, payload)
-	VALUES ($1, $2)
-	RETURNING id;
-	`
-
-	js, err := json.Marshal(payment)
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", op, err)
-	}
-
-	row = tx.QueryRow(eventsQuery, paymentID, js)
-
-	var eventID string
-	if err := row.Scan(&eventID); err != nil {
-		return "", fmt.Errorf("%s: %w", op, err)
-	}
-
-	tx.Commit()
-
-	return paymentID, nil
-}
-
-func NewPostgresStore(db *sql.DB) *PostgresStore {
-	return &PostgresStore{db: db}
+type PaymentService interface {
+	GetByID(ctx context.Context, id string) (*model.Payment, error)
+	Create(ctx context.Context, input service.CreatePaymentInput) (*model.Payment, error)
 }
 
 type Server struct {
-	Logger *slog.Logger
-	Store  Store
+	Logger         *slog.Logger
+	paymentService PaymentService
 }
 
-func NewServer(logger *slog.Logger, store Store) (*Server, error) {
+func NewServer(logger *slog.Logger, paymentService PaymentService) (*Server, error) {
 	const op = "NewServer"
 
 	if logger == nil {
 		return nil, fmt.Errorf("%s: logger is required", op)
 	}
 
-	if store == nil {
-		return nil, fmt.Errorf("%s: store is required", op)
+	if paymentService == nil {
+		return nil, fmt.Errorf("%s: payment serivce is required", op)
 	}
 
-	return &Server{Logger: logger, Store: store}, nil
+	return &Server{Logger: logger, paymentService: paymentService}, nil
 }
 
 func (s *Server) getPaymentHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	_, err := uuid.Parse(id)
-	if err != nil {
+	payment, err := s.paymentService.GetByID(r.Context(), id)
+
+	if errors.Is(err, service.ErrInvalidId) {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{Error: err.Error()})
+		json.NewEncoder(w).Encode(dto.ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	payment, err := s.Store.GetByID(id)
+	if errors.Is(err, service.ErrInvalidPayment) {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(dto.ErrorResponse{Error: err.Error()})
+		return
+	}
 
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, repository.ErrNotFound) {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(ErrorResponse{Error: err.Error()})
+		json.NewEncoder(w).Encode(dto.ErrorResponse{Error: err.Error()})
 		return
 	}
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse{Error: err.Error()})
+		json.NewEncoder(w).Encode(dto.ErrorResponse{Error: err.Error()})
 		return
 	}
 
@@ -200,32 +88,37 @@ func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 	type Request struct {
 		Amount   *float64 `json:"amount"`
 		Provider *string  `json:"provider"`
-		Metadata *any     `json:"metadata"`
+		Metadata any      `json:"metadata"`
 	}
 
 	var request Request
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{Error: err.Error()})
+		json.NewEncoder(w).Encode(dto.ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	if request.Amount == nil || request.Provider == nil || request.Metadata == nil {
+	if request.Amount == nil || request.Provider == nil {
 		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(dto.ErrorResponse{Error: "amount and provider must be specified"})
 		return
 	}
 
-	id, err := s.Store.Create(Payment{Amount: *request.Amount, Provider: *request.Provider, Metadata: *request.Metadata})
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse{Error: err.Error()})
+	payment, err := s.paymentService.Create(r.Context(), service.CreatePaymentInput{
+		Amount:   *request.Amount,
+		Provider: *request.Provider,
+		Metadata: request.Metadata,
+	})
+
+	if errors.Is(err, service.ErrInvalidPayment) {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(dto.ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	payment, err := s.Store.GetByID(id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse{Error: err.Error()})
+		json.NewEncoder(w).Encode(dto.ErrorResponse{Error: err.Error()})
 		return
 	}
 
@@ -296,9 +189,10 @@ func run() error {
 	);
 	`)
 
-	store := NewPostgresStore(db)
+	paymentRepository := repository.NewPaymentRepository(db)
+	paymentService := service.NewPaymentService(paymentRepository)
 
-	server, err := NewServer(logger, store)
+	server, err := NewServer(logger, &paymentService)
 	if err != nil {
 		return fmt.Errorf("server creation failed: %w", err)
 	}
