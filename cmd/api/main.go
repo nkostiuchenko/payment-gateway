@@ -170,25 +170,6 @@ func run() error {
 		}
 	}()
 
-	db.Exec(`
-	CREATE TABLE IF NOT EXISTS payments (
-		id 			UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		amount 		NUMERIC(18, 2) NOT NULL,
-		provider 	TEXT NOT NULL,
-		status 		TEXT NOT NULL,
-		metadata 	JSONB,
-		created_at 	TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		updated_at 	TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-	);
-	
-	CREATE TABLE IF NOT EXISTS payment_events (
-		id 			UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		payment_id 	UUID NOT NULL REFERENCES payments(id),
-		payload 	JSONB NOT NULL,
-		created_at 	TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-	);
-	`)
-
 	paymentRepository := repository.NewPaymentRepository(db)
 	paymentService := service.NewPaymentService(paymentRepository)
 
