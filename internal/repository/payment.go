@@ -99,15 +99,15 @@ func (r *PaymentRepository) GetByID(ctx context.Context, id string) (*model.Paym
 	)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("%s: %w", op, ErrNotFound)
+		return nil, fmt.Errorf("%s: payment not found: %w", op, ErrNotFound)
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: payment query: %w", op, err)
 	}
 
 	if err := json.Unmarshal(metadata, &payment.Metadata); err != nil {
-		return nil, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("%s: unmarshaling metadata: %w", op, err)
 	}
 
 	return &payment, nil
