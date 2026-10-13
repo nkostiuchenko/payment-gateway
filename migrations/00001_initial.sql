@@ -2,7 +2,7 @@
 -- +goose StatementBegin
 CREATE TABLE payments (
     id 			UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    amount 		NUMERIC(18, 2) NOT NULL,
+    amount 		BIGINT NOT NULL CHECK (amount >= 0),
     provider 	TEXT NOT NULL,
     status 		TEXT NOT NULL,
     metadata 	JSONB,
