@@ -17,11 +17,11 @@ type PaymentRepository struct {
 func (r *PaymentRepository) Create(ctx context.Context, payment *model.Payment) error {
 	const op = "PaymentRepository.Create"
 
-	payment.Status = "NEW"
+	status := "NEW"
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+		return fmt.Errorf("%s: begin transaction: %w", op, err)
 	}
 	defer tx.Rollback()
 
@@ -31,41 +31,45 @@ func (r *PaymentRepository) Create(ctx context.Context, payment *model.Payment) 
 	RETURNING id;
 	`
 
-	row := tx.QueryRow(
+	row := tx.QueryRowContext(
+		ctx,
 		paymentsQuery,
 		payment.Amount,
 		payment.Provider,
-		payment.Status,
+		status,
 		payment.Metadata,
 	)
 
 	var paymentID string
 	if err := row.Scan(&paymentID); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+		return fmt.Errorf("%s: insert payment: %w", op, err)
 	}
-	payment.ID = paymentID
 
 	const eventsQuery = `
 	INSERT INTO payment_events (payment_id, payload)
-	VALUES ($1, $2)
-	RETURNING id;
+	VALUES ($1, $2);
 	`
 
-	js, err := json.Marshal(payment)
+	localPayment := *payment
+	localPayment.ID = paymentID
+	localPayment.Status = status
+
+	js, err := json.Marshal(&localPayment)
 	if err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+		return fmt.Errorf("%s: marshaling payment: %w", op, err)
 	}
 
-	row = tx.QueryRow(eventsQuery, paymentID, js)
-
-	var eventID string
-	if err := row.Scan(&eventID); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+	_, err = tx.ExecContext(ctx, eventsQuery, paymentID, js)
+	if err != nil {
+		return fmt.Errorf("%s: insert payment event: %w", op, err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+		return fmt.Errorf("%s: commit: %w", op, err)
 	}
+
+	payment.ID = paymentID
+	payment.Status = status
 
 	return nil
 }
