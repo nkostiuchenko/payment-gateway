@@ -19,7 +19,7 @@ type PaymentService struct {
 }
 
 type CreatePaymentInput struct {
-	Amount   float64
+	Amount   int
 	Provider string
 	Metadata any
 }

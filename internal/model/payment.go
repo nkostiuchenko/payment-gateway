@@ -4,7 +4,7 @@ import "time"
 
 type Payment struct {
 	ID        string    `json:"id"`
-	Amount    float64   `json:"amount"`
+	Amount    int       `json:"amount"`
 	Provider  string    `json:"provider"`
 	Status    string    `json:"status"`
 	Metadata  any       `json:"metadata"`
