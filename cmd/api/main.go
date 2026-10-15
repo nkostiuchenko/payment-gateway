@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/XSAM/otelsql"
@@ -146,15 +148,6 @@ func run() error {
 		return fmt.Errorf("otel setup failed: %w", err)
 	}
 
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		if err := shutdownTracing(ctx); err != nil {
-			logger.Error("otel shutdown failed", "error", err)
-		}
-	}()
-
 	db, err := otelsql.Open("pgx", cfg.DatabaseURL)
 	if err != nil {
 		return fmt.Errorf("db connection failed: %w", err)
@@ -163,12 +156,6 @@ func run() error {
 	if err := db.Ping(); err != nil {
 		return fmt.Errorf("db ping failed: %w", err)
 	}
-
-	defer func() {
-		if err := db.Close(); err != nil {
-			logger.Error("db close failed", "error", err)
-		}
-	}()
 
 	paymentRepository := repository.NewPaymentRepository(db)
 	paymentService := service.NewPaymentService(paymentRepository)
@@ -197,10 +184,47 @@ func run() error {
 	rootMux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	rootMux.Handle("/", handler)
 
-	logger.Info("starting HTTP server", "port", 8080)
+	httpServer := http.Server{
+		Addr:    ":8080",
+		Handler: rootMux,
+	}
 
-	if err := http.ListenAndServe(":8080", rootMux); err != nil {
-		return fmt.Errorf("server stopped: %w", err)
+	serverErr := make(chan error, 1)
+
+	go func() {
+		logger.Info("starting HTTP server", "address", httpServer.Addr)
+		serverErr <- httpServer.ListenAndServe()
+	}()
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+
+	received := <-sig
+	logger.Info("shutdown signal received", "signal", received.String())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	logger.Info("shutting down http server")
+	if err := httpServer.Shutdown(ctx); err != nil {
+		return fmt.Errorf("server shutdown failed: %w", err)
+	}
+
+	if err := <-serverErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("server closed with error: %w", err)
+	}
+
+	logger.Info("closing db connection")
+	if err := db.Close(); err != nil {
+		return fmt.Errorf("db close failed: %w", err)
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	logger.Info("shutting down tracing")
+	if err := shutdownTracing(ctx); err != nil {
+		return fmt.Errorf("otel shutdown failed: %w", err)
 	}
 
 	return nil
