@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -27,11 +29,16 @@ type PaymentCreateCommand struct {
 
 const (
 	commandsTopic = "payment.commands"
+	eventsTopic   = "payment.events"
 	address       = "localhost:9092"
 )
 
 func run() error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	logger.Info("assign signal handler")
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -72,37 +79,57 @@ func run() error {
 		return fmt.Errorf("kafka consumer partition creation failed: %w", err)
 	}
 
+loop:
 	for {
-		message := <-partitionConsumer.Messages()
+		select {
+		case <-sig:
+			break loop
 
-		var command PaymentCreateCommand
-		if err := json.Unmarshal(message.Value, &command); err != nil {
-			logger.Error("malformed command", "error", err)
-			continue
+		case message := <-partitionConsumer.Messages():
+			var command PaymentCreateCommand
+			if err := json.Unmarshal(message.Value, &command); err != nil {
+				logger.Error("malformed command", "error", err)
+				continue
+			}
+
+			payment := model.Payment{
+				Amount:   command.Amount,
+				Provider: command.Provider,
+				Metadata: command.Metadata,
+			}
+
+			err := paymentRepository.Create(context.Background(), &payment)
+
+			if err != nil {
+				logger.Error("payment creation failed", "error", err)
+				continue
+			}
+
+			js, err := json.Marshal(payment)
+			if err != nil {
+				logger.Error("failed to marshal payment", "error", err)
+			}
+
+			producer.SendMessage(&sarama.ProducerMessage{
+				Topic: eventsTopic,
+				Value: sarama.ByteEncoder(js),
+			})
 		}
+	}
 
-		payment := model.Payment{
-			Amount:   command.Amount,
-			Provider: command.Provider,
-			Metadata: command.Metadata,
-		}
+	logger.Info("closing partition consumer")
+	if err := partitionConsumer.Close(); err != nil {
+		return fmt.Errorf("partition consumer close failed: %w", err)
+	}
 
-		err := paymentRepository.Create(context.Background(), &payment)
+	logger.Info("closing consumer")
+	if err := consumer.Close(); err != nil {
+		return fmt.Errorf("consumer close failed: %w", err)
+	}
 
-		if err != nil {
-			logger.Error("payment creation failed", "error", err)
-			continue
-		}
-
-		js, err := json.Marshal(payment)
-		if err != nil {
-			logger.Error("failed to marshal payment", "error", err)
-		}
-
-		producer.SendMessage(&sarama.ProducerMessage{
-			Topic: "payment.events",
-			Value: sarama.ByteEncoder(js),
-		})
+	logger.Info("closing producer")
+	if err := producer.Close(); err != nil {
+		return fmt.Errorf("producer close failed: %w", err)
 	}
 
 	logger.Info("closing db connection")
