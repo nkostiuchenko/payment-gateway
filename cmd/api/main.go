@@ -88,9 +88,9 @@ func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 	const op = "Server.createPayment"
 
 	type Request struct {
-		Amount   *float64 `json:"amount"`
-		Provider *string  `json:"provider"`
-		Metadata any      `json:"metadata"`
+		Amount   *int    `json:"amount"`
+		Provider *string `json:"provider"`
+		Metadata any     `json:"metadata"`
 	}
 
 	var request Request
