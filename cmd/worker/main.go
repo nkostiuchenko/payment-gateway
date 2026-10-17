@@ -3,28 +3,30 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/IBM/sarama"
 	"github.com/XSAM/otelsql"
+	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/nkostiuchenko/payment-gateway/internal/config"
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
+	"github.com/nkostiuchenko/payment-gateway/internal/provider"
 	"github.com/nkostiuchenko/payment-gateway/internal/repository"
 	"github.com/nkostiuchenko/payment-gateway/internal/telemetry"
 )
 
-type PaymentCreateCommand struct {
-	Amount   int    `json:"amount"`
-	Currency string `json:"currency"`
-	Provider string `json:"provider"`
-	Metadata any    `json:"metadata"`
+type Provider interface {
+	Pay(ctx context.Context, amount int, currency string) error
 }
 
 const (
@@ -32,6 +34,173 @@ const (
 	eventsTopic   = "payment.events"
 	address       = "localhost:9092"
 )
+
+var (
+	ErrUnknownPaymentProvider = errors.New("unknown payment provider")
+)
+
+var (
+	paymentProviders = map[string]Provider{
+		"stripe": provider.NewStripeProvider(),
+	}
+)
+
+type EventEnvelope[T any] struct {
+	EventType     string `json:"event_type"`
+	SchemaVersion int    `json:"schema_version"`
+	Payload       T      `json:"payload"`
+}
+
+type PaymentProcessingStarted struct {
+	PaymentID string `json:"payment_id"`
+}
+
+type PaymentProcessingFailed struct {
+	PaymentID string `json:"payment_id"`
+}
+
+type PaymentProcessingSucceeded struct {
+	PaymentID string `json:"payment_id"`
+}
+
+type PaymentCreated struct {
+	model.Payment
+}
+
+func Publish[T any](producer sarama.SyncProducer, envelope EventEnvelope[T]) error {
+	const op = "Publish"
+
+	js, err := json.Marshal(envelope)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	_, _, err = producer.SendMessage(&sarama.ProducerMessage{
+		Topic: eventsTopic,
+		Value: sarama.ByteEncoder(js),
+	})
+
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+
+func PublishProcessingStarted(producer sarama.SyncProducer, paymentID string) error {
+	const op = "PublishProcessingStarted"
+
+	err := Publish(producer, EventEnvelope[PaymentProcessingStarted]{
+		EventType:     "ProcessingStarted",
+		SchemaVersion: 1,
+		Payload:       PaymentProcessingStarted{PaymentID: paymentID},
+	})
+
+	return fmt.Errorf("%s: %w", op, err)
+}
+
+func PublishProcessingFailed(producer sarama.SyncProducer, paymentID string) error {
+	const op = "PublishProcessingFailed"
+
+	err := Publish(producer, EventEnvelope[PaymentProcessingStarted]{
+		EventType:     "ProcessingFailed",
+		SchemaVersion: 1,
+		Payload:       PaymentProcessingStarted{PaymentID: paymentID},
+	})
+
+	return fmt.Errorf("%s: %w", op, err)
+}
+
+func PublishProcessingSucceeded(producer sarama.SyncProducer, paymentID string) error {
+	const op = "PublishProcessingSucceeded"
+
+	err := Publish(producer, EventEnvelope[PaymentProcessingSucceeded]{
+		EventType:     "ProcessingSucceeded",
+		SchemaVersion: 1,
+		Payload:       PaymentProcessingSucceeded{PaymentID: paymentID},
+	})
+
+	return fmt.Errorf("%s: %w", op, err)
+}
+
+func PublishPaymentCreated(producer sarama.SyncProducer, payment model.Payment) error {
+	const op = "PublishPaymentCreated"
+
+	err := Publish(producer, EventEnvelope[model.Payment]{
+		EventType:     "PaymentCreated",
+		SchemaVersion: 1,
+		Payload:       payment,
+	})
+
+	return fmt.Errorf("%s: %w", op, err)
+}
+
+type CommandEnvelope[T any] struct {
+	CommandType   string `json:"command_type"`
+	SchemaVersion int    `json:"schema_version"`
+	Payload       T      `json:"payload"`
+}
+
+func ProcessPayment(producer sarama.SyncProducer, payment model.Payment) error {
+	const op = "ProcessPayment"
+
+	PublishProcessingStarted(producer, payment.ID)
+
+	provider, ok := paymentProviders[payment.Provider]
+	if !ok {
+		PublishProcessingFailed(producer, payment.ID)
+		return fmt.Errorf("%s: %w", op, ErrUnknownPaymentProvider)
+	}
+
+	err := provider.Pay(context.Background(), payment.Amount, payment.Currency)
+	if err != nil {
+		PublishProcessingFailed(producer, payment.ID)
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	PublishProcessingSucceeded(producer, payment.ID)
+
+	return nil
+}
+
+type Worker struct {
+	logger            *slog.Logger
+	paymentRepository *repository.PaymentRepository
+	eventRepository   *repository.EventRepository
+	commandRepository *repository.CommandRepository
+	producer          sarama.SyncProducer
+	wg                *sync.WaitGroup
+}
+
+func (w *Worker) HandleMessage(message *sarama.ConsumerMessage) {
+	var command CommandEnvelope[json.RawMessage]
+	if err := json.Unmarshal(message.Value, &command); err != nil {
+		w.logger.Error("malformed command", "error", err)
+		return
+	}
+
+	if !slices.Contains([]string{"CreatePayment"}, command.CommandType) {
+		w.logger.Error("unknown command type", "command_type", command.CommandType)
+		return
+	}
+
+	if command.CommandType == "CreatePayment" {
+		var payment model.Payment
+		if err := json.Unmarshal(command.Payload, &payment); err != nil {
+			w.logger.Error("malformed command payload", "error", err)
+			return
+		}
+
+		w.commandRepository.Save(context.Background(), &model.Command{
+			ID:          uuid.NewString(),
+			CommandType: "CreatePayment",
+			Payload:     payment,
+			CreatedAt:   time.Now(),
+		})
+
+		PublishPaymentCreated(w.producer, payment)
+	}
+}
 
 func run() error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -60,6 +229,7 @@ func run() error {
 	}
 
 	paymentRepository := repository.NewPaymentRepository(db)
+	commandRepository := repository.NewCommandRepository(db)
 
 	config := sarama.NewConfig()
 	config.Producer.Return.Successes = true
@@ -79,43 +249,28 @@ func run() error {
 		return fmt.Errorf("kafka consumer partition creation failed: %w", err)
 	}
 
+	worker := Worker{
+		wg:                &sync.WaitGroup{},
+		logger:            logger,
+		producer:          producer,
+		paymentRepository: paymentRepository,
+		commandRepository: commandRepository,
+	}
+
 loop:
 	for {
 		select {
 		case <-sig:
 			break loop
-
 		case message := <-partitionConsumer.Messages():
-			var command PaymentCreateCommand
-			if err := json.Unmarshal(message.Value, &command); err != nil {
-				logger.Error("malformed command", "error", err)
-				continue
-			}
-
-			payment := model.Payment{
-				Amount:   command.Amount,
-				Provider: command.Provider,
-				Metadata: command.Metadata,
-			}
-
-			err := paymentRepository.Create(context.Background(), &payment)
-
-			if err != nil {
-				logger.Error("payment creation failed", "error", err)
-				continue
-			}
-
-			js, err := json.Marshal(payment)
-			if err != nil {
-				logger.Error("failed to marshal payment", "error", err)
-			}
-
-			producer.SendMessage(&sarama.ProducerMessage{
-				Topic: eventsTopic,
-				Value: sarama.ByteEncoder(js),
+			worker.wg.Go(func() {
+				worker.HandleMessage(message)
 			})
 		}
 	}
+
+	logger.Info("waiting for all messages be handled")
+	worker.wg.Wait()
 
 	logger.Info("closing partition consumer")
 	if err := partitionConsumer.Close(); err != nil {
