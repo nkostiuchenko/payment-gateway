@@ -14,34 +14,35 @@ type PaymentRepository struct {
 	db *sql.DB
 }
 
-func (r *PaymentRepository) Create(ctx context.Context, payment *model.Payment) error {
-	const op = "PaymentRepository.Create"
-
-	status := "NEW"
+func (r *PaymentRepository) Save(ctx context.Context, payment *model.Payment) error {
+	const op = "PaymentRepository.Save"
 
 	const paymentsQuery = `
-	INSERT INTO payments (amount, currency, provider, status, metadata)
-	VALUES ($1, $2, $3, $4, $5)
-	RETURNING id;
+	INSERT INTO payments (id, amount, currency, provider, status, metadata)
+	VALUES ($1, $2, $3, $4, $5, $6)
+	ON CONFLICT (id) DO UPDATE
+	SET
+		amount = EXCLUDED.amount,
+		currency = EXCLUDED.currency,
+		provider = EXCLUDED.provider,
+		status = EXCLUDED.status,
+		metadata = EXCLUDED.metadata;
 	`
 
-	row := r.db.QueryRowContext(
+	_, err := r.db.ExecContext(
 		ctx,
 		paymentsQuery,
+		payment.ID,
 		payment.Amount,
 		payment.Currency,
 		payment.Provider,
-		status,
+		payment.Status,
 		payment.Metadata,
 	)
 
-	var paymentID string
-	if err := row.Scan(&paymentID); err != nil {
+	if err != nil {
 		return fmt.Errorf("%s: insert payment: %w", op, err)
 	}
-
-	payment.ID = paymentID
-	payment.Status = status
 
 	return nil
 }

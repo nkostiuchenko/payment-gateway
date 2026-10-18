@@ -18,7 +18,7 @@ func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 	const query = `
 	INSERT INTO payment_events (id, event_type, payment_id, payload, created_at)
 	VALUES ($1, $2, $3, $4, $5)
-	ON CONFLICT DO UPDATE 
+	ON CONFLICT (id) DO UPDATE 
 	SET
 		event_type = EXCLUDED.event_type,
 		payment_id = EXCLUDED.payment_id,
@@ -29,9 +29,11 @@ func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 	_, err := r.db.ExecContext(
 		ctx,
 		query,
+		event.ID,
 		event.EventType,
 		event.PaymentID,
 		event.Payload,
+		event.CreatedAt,
 	)
 
 	if err != nil {

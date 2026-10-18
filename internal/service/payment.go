@@ -10,7 +10,7 @@ import (
 )
 
 type PaymentRepository interface {
-	Create(ctx context.Context, payment *model.Payment) error
+	Save(ctx context.Context, payment *model.Payment) error
 	GetByID(ctx context.Context, id string) (*model.Payment, error)
 }
 
@@ -41,7 +41,7 @@ func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (
 		Metadata: input.Metadata,
 	}
 
-	if err := s.repo.Create(ctx, &payment); err != nil {
+	if err := s.repo.Save(ctx, &payment); err != nil {
 		return nil, fmt.Errorf("%s: create payment: %w", op, err)
 	}
 

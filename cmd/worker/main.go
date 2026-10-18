@@ -172,7 +172,7 @@ type Worker struct {
 	wg                *sync.WaitGroup
 }
 
-func (w *Worker) HandleMessage(message *sarama.ConsumerMessage) {
+func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
 	var command CommandEnvelope[json.RawMessage]
 	if err := json.Unmarshal(message.Value, &command); err != nil {
 		w.logger.Error("malformed command", "error", err)
@@ -199,6 +199,42 @@ func (w *Worker) HandleMessage(message *sarama.ConsumerMessage) {
 		})
 
 		PublishPaymentCreated(w.producer, payment)
+	}
+}
+
+func (w *Worker) HandleEventMessage(message *sarama.ConsumerMessage) {
+	var envelope EventEnvelope[json.RawMessage]
+	if err := json.Unmarshal(message.Value, &envelope); err != nil {
+		w.logger.Error("malformed event", "error", err)
+		return
+	}
+
+	if !slices.Contains([]string{"PaymentCreated"}, envelope.EventType) {
+		w.logger.Error("unknown event type", "command_type", envelope.EventType)
+		return
+	}
+
+	if envelope.EventType == "PaymentCreated" {
+		var payment model.Payment
+		if err := json.Unmarshal(envelope.Payload, &payment); err != nil {
+			w.logger.Error("malformed event payload", "error", err)
+			return
+		}
+
+		// FIXME: no exception handling
+		w.paymentRepository.Save(context.Background(), &payment)
+
+		// FIXME: no exception handling
+		w.eventRepository.Save(context.Background(), &model.Event{
+			ID:        uuid.NewString(),
+			EventType: envelope.EventType,
+			PaymentID: payment.ID,
+			Payload:   envelope.Payload,
+			CreatedAt: time.Now(),
+		})
+
+		// FIXME: one save may commit but another failed
+		return
 	}
 }
 
@@ -230,6 +266,7 @@ func run() error {
 
 	paymentRepository := repository.NewPaymentRepository(db)
 	commandRepository := repository.NewCommandRepository(db)
+	eventRepository := repository.NewEventRepository(db)
 
 	config := sarama.NewConfig()
 	config.Producer.Return.Successes = true
@@ -244,9 +281,14 @@ func run() error {
 		return fmt.Errorf("kafka consumer creation failed: %w", err)
 	}
 
-	partitionConsumer, err := consumer.ConsumePartition(commandsTopic, 0, sarama.OffsetOldest)
+	commandConsumer, err := consumer.ConsumePartition(commandsTopic, 0, sarama.OffsetOldest)
 	if err != nil {
-		return fmt.Errorf("kafka consumer partition creation failed: %w", err)
+		return fmt.Errorf("kafka command consumer creation failed: %w", err)
+	}
+
+	eventConsumer, err := consumer.ConsumePartition(eventsTopic, 0, sarama.OffsetOldest)
+	if err != nil {
+		return fmt.Errorf("kafka event consumer creation failed: %w", err)
 	}
 
 	worker := Worker{
@@ -255,6 +297,7 @@ func run() error {
 		producer:          producer,
 		paymentRepository: paymentRepository,
 		commandRepository: commandRepository,
+		eventRepository:   eventRepository,
 	}
 
 loop:
@@ -262,9 +305,13 @@ loop:
 		select {
 		case <-sig:
 			break loop
-		case message := <-partitionConsumer.Messages():
+		case message := <-commandConsumer.Messages():
 			worker.wg.Go(func() {
-				worker.HandleMessage(message)
+				worker.HandleCommandMessage(message)
+			})
+		case message := <-eventConsumer.Messages():
+			worker.wg.Go(func() {
+				worker.HandleEventMessage(message)
 			})
 		}
 	}
@@ -272,9 +319,14 @@ loop:
 	logger.Info("waiting for all messages be handled")
 	worker.wg.Wait()
 
-	logger.Info("closing partition consumer")
-	if err := partitionConsumer.Close(); err != nil {
-		return fmt.Errorf("partition consumer close failed: %w", err)
+	logger.Info("closing event consumer")
+	if err := eventConsumer.Close(); err != nil {
+		return fmt.Errorf("event consumer close failed: %w", err)
+	}
+
+	logger.Info("closing command consumer")
+	if err := commandConsumer.Close(); err != nil {
+		return fmt.Errorf("command consumer close failed: %w", err)
 	}
 
 	logger.Info("closing consumer")
