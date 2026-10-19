@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/config"
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
 	"github.com/nkostiuchenko/payment-gateway/internal/provider"
@@ -28,12 +29,6 @@ import (
 type Provider interface {
 	Pay(ctx context.Context, amount int, currency string) error
 }
-
-const (
-	commandsTopic = "payment.commands"
-	eventsTopic   = "payment.events"
-	address       = "localhost:9092"
-)
 
 var (
 	ErrUnknownPaymentProvider = errors.New("unknown payment provider")
@@ -76,7 +71,7 @@ func Publish[T any](producer sarama.SyncProducer, envelope EventEnvelope[T]) err
 	}
 
 	_, _, err = producer.SendMessage(&sarama.ProducerMessage{
-		Topic: eventsTopic,
+		Topic: common.EventsTopic,
 		Value: sarama.ByteEncoder(js),
 	})
 
@@ -271,22 +266,22 @@ func run() error {
 	config := sarama.NewConfig()
 	config.Producer.Return.Successes = true
 
-	producer, err := sarama.NewSyncProducer([]string{address}, config)
+	producer, err := sarama.NewSyncProducer([]string{common.Address}, config)
 	if err != nil {
 		return fmt.Errorf("kafka producer creation failed: %w", err)
 	}
 
-	consumer, err := sarama.NewConsumer([]string{address}, config)
+	consumer, err := sarama.NewConsumer([]string{common.Address}, config)
 	if err != nil {
 		return fmt.Errorf("kafka consumer creation failed: %w", err)
 	}
 
-	commandConsumer, err := consumer.ConsumePartition(commandsTopic, 0, sarama.OffsetOldest)
+	commandConsumer, err := consumer.ConsumePartition(common.CommandsTopic, 0, sarama.OffsetOldest)
 	if err != nil {
 		return fmt.Errorf("kafka command consumer creation failed: %w", err)
 	}
 
-	eventConsumer, err := consumer.ConsumePartition(eventsTopic, 0, sarama.OffsetOldest)
+	eventConsumer, err := consumer.ConsumePartition(common.EventsTopic, 0, sarama.OffsetOldest)
 	if err != nil {
 		return fmt.Errorf("kafka event consumer creation failed: %w", err)
 	}
