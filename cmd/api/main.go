@@ -134,7 +134,7 @@ func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 }
 
 func run() error {
-	logger := slog.New(logging.NewRequestIDHandler(slog.NewJSONHandler(os.Stdout, nil)))
+	logger := slog.New(logging.NewOtelID(logging.NewRequestIDHandler(slog.NewJSONHandler(os.Stdout, nil))))
 
 	cfg, err := config.Load()
 	if err != nil {
