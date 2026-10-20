@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
 )
 
@@ -14,14 +17,20 @@ type PaymentRepository interface {
 	GetByID(ctx context.Context, id string) (*model.Payment, error)
 }
 
+type Broker interface {
+	Publish(ctx context.Context, topic string, content []byte) error
+}
+
 type PaymentService struct {
-	repo PaymentRepository
+	repo   PaymentRepository
+	broker Broker
 }
 
 type CreatePaymentInput struct {
 	Amount   int
+	Currency string
 	Provider string
-	Metadata any
+	Metadata *json.RawMessage
 }
 
 func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (*model.Payment, error) {
@@ -36,13 +45,29 @@ func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (
 	}
 
 	payment := model.Payment{
-		Amount:   input.Amount,
-		Provider: input.Provider,
-		Metadata: input.Metadata,
+		ID:        uuid.NewString(),
+		Amount:    input.Amount,
+		Currency:  input.Currency,
+		Provider:  input.Provider,
+		Status:    "NEW",
+		Metadata:  input.Metadata,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 
-	if err := s.repo.Save(ctx, &payment); err != nil {
-		return nil, fmt.Errorf("%s: create payment: %w", op, err)
+	command := model.CommandEnvelope[model.Payment]{
+		CommandType:   "CreatePayment",
+		SchemaVersion: 1,
+		Payload:       payment,
+	}
+
+	js, err := json.Marshal(command)
+	if err != nil {
+		return nil, fmt.Errorf("%s: marshaling of command: %w", op, err)
+	}
+
+	if err := s.broker.Publish(ctx, common.CommandsTopic, js); err != nil {
+		return nil, fmt.Errorf("%s: publish create payment: %w", op, err)
 	}
 
 	return &payment, nil
@@ -63,6 +88,6 @@ func (s *PaymentService) GetByID(ctx context.Context, id string) (*model.Payment
 	return payment, nil
 }
 
-func NewPaymentService(repo PaymentRepository) PaymentService {
-	return PaymentService{repo: repo}
+func NewPaymentService(repo PaymentRepository, broker Broker) PaymentService {
+	return PaymentService{repo: repo, broker: broker}
 }

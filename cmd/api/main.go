@@ -19,6 +19,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/nkostiuchenko/payment-gateway/internal/broker"
+	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/config"
 	"github.com/nkostiuchenko/payment-gateway/internal/dto"
 	"github.com/nkostiuchenko/payment-gateway/internal/metrics"
@@ -88,9 +90,10 @@ func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 	const op = "Server.createPayment"
 
 	type Request struct {
-		Amount   *int    `json:"amount"`
-		Provider *string `json:"provider"`
-		Metadata any     `json:"metadata"`
+		Amount   *int             `json:"amount"`
+		Currency *string          `json:"currency"`
+		Provider *string          `json:"provider"`
+		Metadata *json.RawMessage `json:"metadata"`
 	}
 
 	var request Request
@@ -100,15 +103,16 @@ func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if request.Amount == nil || request.Provider == nil {
+	if request.Amount == nil || request.Provider == nil || request.Currency == nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(dto.ErrorResponse{Error: "amount and provider must be specified"})
+		json.NewEncoder(w).Encode(dto.ErrorResponse{Error: "amount, provider and currency must be specified"})
 		return
 	}
 
 	payment, err := s.paymentService.Create(r.Context(), service.CreatePaymentInput{
 		Amount:   *request.Amount,
 		Provider: *request.Provider,
+		Currency: *request.Currency,
 		Metadata: request.Metadata,
 	})
 
@@ -157,8 +161,13 @@ func run() error {
 		return fmt.Errorf("db ping failed: %w", err)
 	}
 
+	broker, err := broker.NewKafkaBroker(common.Address)
+	if err != nil {
+		return fmt.Errorf("broker creation failed: %w", err)
+	}
+
 	paymentRepository := repository.NewPaymentRepository(db)
-	paymentService := service.NewPaymentService(paymentRepository)
+	paymentService := service.NewPaymentService(paymentRepository, broker)
 
 	server, err := NewServer(logger, &paymentService)
 	if err != nil {
