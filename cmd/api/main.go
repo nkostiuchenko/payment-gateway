@@ -22,6 +22,7 @@ import (
 	"github.com/nkostiuchenko/payment-gateway/internal/broker"
 	"github.com/nkostiuchenko/payment-gateway/internal/config"
 	"github.com/nkostiuchenko/payment-gateway/internal/dto"
+	"github.com/nkostiuchenko/payment-gateway/internal/logging"
 	"github.com/nkostiuchenko/payment-gateway/internal/metrics"
 	"github.com/nkostiuchenko/payment-gateway/internal/middleware"
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
@@ -133,7 +134,7 @@ func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 }
 
 func run() error {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := slog.New(logging.NewRequestIDHandler(slog.NewJSONHandler(os.Stdout, nil)))
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -179,6 +180,7 @@ func run() error {
 
 	handler := middleware.ContentJSON(mux)
 	handler = middleware.RequestLogger(logger)(handler)
+	handler = middleware.RequestID(handler)
 	handler = otelhttp.NewHandler(handler, "http.server")
 	handler = promhttp.InstrumentHandlerCounter(appMetrics.HTTPRequestsTotal, handler)
 	handler = promhttp.InstrumentHandlerDuration(appMetrics.HTTPRequestDuration, handler)

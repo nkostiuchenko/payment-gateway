@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/nkostiuchenko/payment-gateway/internal/common/requestid"
 )
 
 func ContentJSON(next http.Handler) http.Handler {
@@ -30,7 +32,16 @@ func RequestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 			tw := &trackingWriter{ResponseWriter: w, Status: 200}
 			next.ServeHTTP(tw, r)
 			duration := time.Since(start)
-			logger.Info("request", "method", r.Method, "url", r.URL.Path, "status", tw.Status, "duration", duration)
+			logger.InfoContext(r.Context(), "request", "method", r.Method, "url", r.URL.Path, "status", tw.Status, "duration", duration)
 		})
 	}
+}
+
+func RequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := requestid.New()
+		ctx := requestid.NewContext(r.Context(), id)
+		w.Header().Set("X-Request-ID", id)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
