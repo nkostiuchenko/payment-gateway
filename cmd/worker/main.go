@@ -64,7 +64,7 @@ func PublishProcessingStarted(producer sarama.SyncProducer, paymentID string) er
 	const op = "PublishProcessingStarted"
 
 	err := Publish(producer, model.EventEnvelope[model.PaymentProcessingStarted]{
-		EventType:     "ProcessingStarted",
+		EventType:     common.EventProcessingStarted,
 		SchemaVersion: 1,
 		Payload:       model.PaymentProcessingStarted{PaymentID: paymentID},
 	})
@@ -76,7 +76,7 @@ func PublishProcessingFailed(producer sarama.SyncProducer, paymentID string) err
 	const op = "PublishProcessingFailed"
 
 	err := Publish(producer, model.EventEnvelope[model.PaymentProcessingStarted]{
-		EventType:     "ProcessingFailed",
+		EventType:     common.EventProcessingFailed,
 		SchemaVersion: 1,
 		Payload:       model.PaymentProcessingStarted{PaymentID: paymentID},
 	})
@@ -88,7 +88,7 @@ func PublishProcessingSucceeded(producer sarama.SyncProducer, paymentID string) 
 	const op = "PublishProcessingSucceeded"
 
 	err := Publish(producer, model.EventEnvelope[model.PaymentProcessingSucceeded]{
-		EventType:     "ProcessingSucceeded",
+		EventType:     common.EventProcessingSucceeded,
 		SchemaVersion: 1,
 		Payload:       model.PaymentProcessingSucceeded{PaymentID: paymentID},
 	})
@@ -100,7 +100,7 @@ func PublishPaymentCreated(producer sarama.SyncProducer, payment model.Payment) 
 	const op = "PublishPaymentCreated"
 
 	err := Publish(producer, model.EventEnvelope[model.Payment]{
-		EventType:     "PaymentCreated",
+		EventType:     common.EventPaymentCreated,
 		SchemaVersion: 1,
 		Payload:       payment,
 	})
@@ -146,12 +146,14 @@ func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
 		return
 	}
 
-	if !slices.Contains([]string{"CreatePayment"}, command.CommandType) {
+	knownCommands := []string{common.CommandCreatePayment}
+
+	if !slices.Contains(knownCommands, command.CommandType) {
 		w.logger.Error("unknown command type", "command_type", command.CommandType)
 		return
 	}
 
-	if command.CommandType == "CreatePayment" {
+	if command.CommandType == common.CommandCreatePayment {
 		var payment model.Payment
 		if err := json.Unmarshal(command.Payload, &payment); err != nil {
 			w.logger.Error("malformed command payload", "error", err)
@@ -160,12 +162,14 @@ func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
 
 		w.commandRepository.Save(context.Background(), &model.Command{
 			ID:          uuid.NewString(),
-			CommandType: "CreatePayment",
+			CommandType: common.CommandCreatePayment,
 			Payload:     payment,
 			CreatedAt:   time.Now(),
 		})
 
 		PublishPaymentCreated(w.producer, payment)
+
+		ProcessPayment(w.producer, payment)
 	}
 }
 
@@ -176,12 +180,19 @@ func (w *Worker) HandleEventMessage(message *sarama.ConsumerMessage) {
 		return
 	}
 
-	if !slices.Contains([]string{"PaymentCreated"}, envelope.EventType) {
+	knownEvents := []string{
+		common.EventPaymentCreated,
+		common.EventProcessingStarted,
+		common.EventProcessingFailed,
+		common.EventProcessingSucceeded,
+	}
+
+	if !slices.Contains(knownEvents, envelope.EventType) {
 		w.logger.Error("unknown event type", "command_type", envelope.EventType)
 		return
 	}
 
-	if envelope.EventType == "PaymentCreated" {
+	if envelope.EventType == common.EventPaymentCreated {
 		var payment model.Payment
 		if err := json.Unmarshal(envelope.Payload, &payment); err != nil {
 			w.logger.Error("malformed event payload", "error", err)
@@ -201,6 +212,90 @@ func (w *Worker) HandleEventMessage(message *sarama.ConsumerMessage) {
 		})
 
 		// FIXME: one save may commit but another failed
+		return
+	}
+
+	if envelope.EventType == common.EventProcessingStarted {
+		var payload model.PaymentProcessingStarted
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			w.logger.Error("malformed event payload", "error", err)
+			return
+		}
+
+		payment, err := w.paymentRepository.GetByID(context.Background(), payload.PaymentID)
+		if err != nil {
+			w.logger.Error("payment not found", "error", err)
+			return
+		}
+
+		payment.Status = common.StatusProcessing
+
+		w.paymentRepository.Save(context.Background(), payment)
+
+		w.eventRepository.Save(context.Background(), &model.Event{
+			ID:        uuid.NewString(),
+			EventType: envelope.EventType,
+			PaymentID: payment.ID,
+			Payload:   envelope.Payload,
+			CreatedAt: time.Now(),
+		})
+
+		return
+	}
+
+	if envelope.EventType == common.EventProcessingFailed {
+		var payload model.PaymentProcessingFailed
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			w.logger.Error("malformed event payload", "error", err)
+			return
+		}
+
+		payment, err := w.paymentRepository.GetByID(context.Background(), payload.PaymentID)
+		if err != nil {
+			w.logger.Error("payment not found", "error", err)
+			return
+		}
+
+		payment.Status = common.StatusFailed
+
+		w.paymentRepository.Save(context.Background(), payment)
+
+		w.eventRepository.Save(context.Background(), &model.Event{
+			ID:        uuid.NewString(),
+			EventType: envelope.EventType,
+			PaymentID: payment.ID,
+			Payload:   envelope.Payload,
+			CreatedAt: time.Now(),
+		})
+
+		return
+	}
+
+	if envelope.EventType == common.EventProcessingSucceeded {
+		var payload model.PaymentProcessingSucceeded
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			w.logger.Error("malformed event payload", "error", err)
+			return
+		}
+
+		payment, err := w.paymentRepository.GetByID(context.Background(), payload.PaymentID)
+		if err != nil {
+			w.logger.Error("payment not found", "error", err)
+			return
+		}
+
+		payment.Status = common.StatusCompleted
+
+		w.paymentRepository.Save(context.Background(), payment)
+
+		w.eventRepository.Save(context.Background(), &model.Event{
+			ID:        uuid.NewString(),
+			EventType: envelope.EventType,
+			PaymentID: payment.ID,
+			Payload:   envelope.Payload,
+			CreatedAt: time.Now(),
+		})
+
 		return
 	}
 }
