@@ -40,29 +40,7 @@ var (
 	}
 )
 
-type EventEnvelope[T any] struct {
-	EventType     string `json:"event_type"`
-	SchemaVersion int    `json:"schema_version"`
-	Payload       T      `json:"payload"`
-}
-
-type PaymentProcessingStarted struct {
-	PaymentID string `json:"payment_id"`
-}
-
-type PaymentProcessingFailed struct {
-	PaymentID string `json:"payment_id"`
-}
-
-type PaymentProcessingSucceeded struct {
-	PaymentID string `json:"payment_id"`
-}
-
-type PaymentCreated struct {
-	model.Payment
-}
-
-func Publish[T any](producer sarama.SyncProducer, envelope EventEnvelope[T]) error {
+func Publish[T any](producer sarama.SyncProducer, envelope model.EventEnvelope[T]) error {
 	const op = "Publish"
 
 	js, err := json.Marshal(envelope)
@@ -85,10 +63,10 @@ func Publish[T any](producer sarama.SyncProducer, envelope EventEnvelope[T]) err
 func PublishProcessingStarted(producer sarama.SyncProducer, paymentID string) error {
 	const op = "PublishProcessingStarted"
 
-	err := Publish(producer, EventEnvelope[PaymentProcessingStarted]{
+	err := Publish(producer, model.EventEnvelope[model.PaymentProcessingStarted]{
 		EventType:     "ProcessingStarted",
 		SchemaVersion: 1,
-		Payload:       PaymentProcessingStarted{PaymentID: paymentID},
+		Payload:       model.PaymentProcessingStarted{PaymentID: paymentID},
 	})
 
 	return fmt.Errorf("%s: %w", op, err)
@@ -97,10 +75,10 @@ func PublishProcessingStarted(producer sarama.SyncProducer, paymentID string) er
 func PublishProcessingFailed(producer sarama.SyncProducer, paymentID string) error {
 	const op = "PublishProcessingFailed"
 
-	err := Publish(producer, EventEnvelope[PaymentProcessingStarted]{
+	err := Publish(producer, model.EventEnvelope[model.PaymentProcessingStarted]{
 		EventType:     "ProcessingFailed",
 		SchemaVersion: 1,
-		Payload:       PaymentProcessingStarted{PaymentID: paymentID},
+		Payload:       model.PaymentProcessingStarted{PaymentID: paymentID},
 	})
 
 	return fmt.Errorf("%s: %w", op, err)
@@ -109,10 +87,10 @@ func PublishProcessingFailed(producer sarama.SyncProducer, paymentID string) err
 func PublishProcessingSucceeded(producer sarama.SyncProducer, paymentID string) error {
 	const op = "PublishProcessingSucceeded"
 
-	err := Publish(producer, EventEnvelope[PaymentProcessingSucceeded]{
+	err := Publish(producer, model.EventEnvelope[model.PaymentProcessingSucceeded]{
 		EventType:     "ProcessingSucceeded",
 		SchemaVersion: 1,
-		Payload:       PaymentProcessingSucceeded{PaymentID: paymentID},
+		Payload:       model.PaymentProcessingSucceeded{PaymentID: paymentID},
 	})
 
 	return fmt.Errorf("%s: %w", op, err)
@@ -121,19 +99,13 @@ func PublishProcessingSucceeded(producer sarama.SyncProducer, paymentID string) 
 func PublishPaymentCreated(producer sarama.SyncProducer, payment model.Payment) error {
 	const op = "PublishPaymentCreated"
 
-	err := Publish(producer, EventEnvelope[model.Payment]{
+	err := Publish(producer, model.EventEnvelope[model.Payment]{
 		EventType:     "PaymentCreated",
 		SchemaVersion: 1,
 		Payload:       payment,
 	})
 
 	return fmt.Errorf("%s: %w", op, err)
-}
-
-type CommandEnvelope[T any] struct {
-	CommandType   string `json:"command_type"`
-	SchemaVersion int    `json:"schema_version"`
-	Payload       T      `json:"payload"`
 }
 
 func ProcessPayment(producer sarama.SyncProducer, payment model.Payment) error {
@@ -168,7 +140,7 @@ type Worker struct {
 }
 
 func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
-	var command CommandEnvelope[json.RawMessage]
+	var command model.CommandEnvelope[json.RawMessage]
 	if err := json.Unmarshal(message.Value, &command); err != nil {
 		w.logger.Error("malformed command", "error", err)
 		return
@@ -198,7 +170,7 @@ func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
 }
 
 func (w *Worker) HandleEventMessage(message *sarama.ConsumerMessage) {
-	var envelope EventEnvelope[json.RawMessage]
+	var envelope model.EventEnvelope[json.RawMessage]
 	if err := json.Unmarshal(message.Value, &envelope); err != nil {
 		w.logger.Error("malformed event", "error", err)
 		return

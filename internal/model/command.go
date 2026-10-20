@@ -8,3 +8,9 @@ type Command struct {
 	Payload     any       `json:"payload"`
 	CreatedAt   time.Time `json:"created_at"`
 }
+
+type CommandEnvelope[T any] struct {
+	CommandType   string `json:"command_type"`
+	SchemaVersion int    `json:"schema_version"`
+	Payload       T      `json:"payload"`
+}
