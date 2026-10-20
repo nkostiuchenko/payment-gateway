@@ -248,12 +248,14 @@ func run() error {
 		return fmt.Errorf("kafka consumer creation failed: %w", err)
 	}
 
-	commandConsumer, err := consumer.ConsumePartition(common.CommandsTopic, 0, sarama.OffsetOldest)
+	// FIXME: replace with consumer group
+	commandConsumer, err := consumer.ConsumePartition(common.CommandsTopic, 0, sarama.OffsetNewest)
 	if err != nil {
 		return fmt.Errorf("kafka command consumer creation failed: %w", err)
 	}
 
-	eventConsumer, err := consumer.ConsumePartition(common.EventsTopic, 0, sarama.OffsetOldest)
+	// FIXME: replace with consumer group
+	eventConsumer, err := consumer.ConsumePartition(common.EventsTopic, 0, sarama.OffsetNewest)
 	if err != nil {
 		return fmt.Errorf("kafka event consumer creation failed: %w", err)
 	}
