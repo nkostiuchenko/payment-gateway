@@ -23,6 +23,7 @@ import (
 	"github.com/nkostiuchenko/payment-gateway/internal/config"
 	"github.com/nkostiuchenko/payment-gateway/internal/dto"
 	"github.com/nkostiuchenko/payment-gateway/internal/metrics"
+	"github.com/nkostiuchenko/payment-gateway/internal/middleware"
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
 	"github.com/nkostiuchenko/payment-gateway/internal/repository"
 	"github.com/nkostiuchenko/payment-gateway/internal/service"
@@ -131,13 +132,6 @@ func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(payment)
 }
 
-func contentJSON(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		next.ServeHTTP(w, r)
-	})
-}
-
 func run() error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
@@ -183,7 +177,8 @@ func run() error {
 	mux.HandleFunc("POST /payments", server.createPayment)
 	mux.HandleFunc("GET /payments/{id}", server.getPaymentHandler)
 
-	handler := contentJSON(mux)
+	handler := middleware.ContentJSON(mux)
+	handler = middleware.RequestLogger(logger)(handler)
 	handler = otelhttp.NewHandler(handler, "http.server")
 	handler = promhttp.InstrumentHandlerCounter(appMetrics.HTTPRequestsTotal, handler)
 	handler = promhttp.InstrumentHandlerDuration(appMetrics.HTTPRequestDuration, handler)
