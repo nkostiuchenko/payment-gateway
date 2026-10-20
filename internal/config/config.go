@@ -9,6 +9,7 @@ type Config struct {
 	AppEnv      string `env:"APP_ENV" envDefault:"development"`
 	DatabaseURL string `env:"DATABASE_URL,required"`
 	Debug       bool   `env:"DEBUG" envDefault:"false"`
+	KafkaURL    string `env:"KAFKA_URL,required"`
 }
 
 func Load() (Config, error) {

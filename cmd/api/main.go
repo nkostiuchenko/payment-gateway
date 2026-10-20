@@ -20,7 +20,6 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/nkostiuchenko/payment-gateway/internal/broker"
-	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/config"
 	"github.com/nkostiuchenko/payment-gateway/internal/dto"
 	"github.com/nkostiuchenko/payment-gateway/internal/metrics"
@@ -161,7 +160,7 @@ func run() error {
 		return fmt.Errorf("db ping failed: %w", err)
 	}
 
-	broker, err := broker.NewKafkaBroker(common.Address)
+	broker, err := broker.NewKafkaBroker(cfg.KafkaURL)
 	if err != nil {
 		return fmt.Errorf("broker creation failed: %w", err)
 	}

@@ -8,17 +8,17 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 
+ARG APP
+
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
     -ldflags="-s -w" \
-    -o /app/server ./cmd/api
+    -o /app/bin ./cmd/${APP}
 
 FROM alpine:3.22
 
 WORKDIR /app
 
-COPY --from=builder /app/server ./server
+COPY --from=builder /app/bin ./bin
 
-EXPOSE 8080
-
-CMD ["./server"]
+CMD ["./bin"]

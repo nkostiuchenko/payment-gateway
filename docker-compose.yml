@@ -3,10 +3,25 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        APP: api
     env_file:
       - .env
     ports:
       - "8080:8080"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: worker
+    env_file:
+      - .env
     restart: unless-stopped
     depends_on:
       postgres:

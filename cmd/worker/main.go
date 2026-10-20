@@ -325,12 +325,12 @@ func run() error {
 	config := sarama.NewConfig()
 	config.Producer.Return.Successes = true
 
-	producer, err := sarama.NewSyncProducer([]string{common.Address}, config)
+	producer, err := sarama.NewSyncProducer([]string{cfg.KafkaURL}, config)
 	if err != nil {
 		return fmt.Errorf("kafka producer creation failed: %w", err)
 	}
 
-	consumer, err := sarama.NewConsumer([]string{common.Address}, config)
+	consumer, err := sarama.NewConsumer([]string{cfg.KafkaURL}, config)
 	if err != nil {
 		return fmt.Errorf("kafka consumer creation failed: %w", err)
 	}
