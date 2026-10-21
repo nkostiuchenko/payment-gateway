@@ -19,6 +19,7 @@ import (
 
 	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/config"
+	"github.com/nkostiuchenko/payment-gateway/internal/logging"
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
 	"github.com/nkostiuchenko/payment-gateway/internal/provider"
 	"github.com/nkostiuchenko/payment-gateway/internal/repository"
@@ -39,8 +40,11 @@ var (
 	}
 )
 
-func Publish[T any](producer sarama.SyncProducer, envelope model.EventEnvelope[T]) error {
+func Publish[T any](ctx context.Context, producer sarama.SyncProducer, envelope model.EventEnvelope[T]) error {
 	const op = "Publish"
+
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
 
 	js, err := json.Marshal(envelope)
 	if err != nil {
@@ -59,10 +63,13 @@ func Publish[T any](producer sarama.SyncProducer, envelope model.EventEnvelope[T
 	return nil
 }
 
-func PublishProcessingStarted(producer sarama.SyncProducer, paymentID string) error {
+func PublishProcessingStarted(ctx context.Context, producer sarama.SyncProducer, paymentID string) error {
 	const op = "PublishProcessingStarted"
 
-	err := Publish(producer, model.EventEnvelope[model.PaymentProcessingStarted]{
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
+
+	err := Publish(ctx, producer, model.EventEnvelope[model.PaymentProcessingStarted]{
 		EventType:     common.EventProcessingStarted,
 		SchemaVersion: 1,
 		Payload:       model.PaymentProcessingStarted{PaymentID: paymentID},
@@ -71,10 +78,13 @@ func PublishProcessingStarted(producer sarama.SyncProducer, paymentID string) er
 	return fmt.Errorf("%s: %w", op, err)
 }
 
-func PublishProcessingFailed(producer sarama.SyncProducer, paymentID string) error {
+func PublishProcessingFailed(ctx context.Context, producer sarama.SyncProducer, paymentID string) error {
 	const op = "PublishProcessingFailed"
 
-	err := Publish(producer, model.EventEnvelope[model.PaymentProcessingStarted]{
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
+
+	err := Publish(ctx, producer, model.EventEnvelope[model.PaymentProcessingStarted]{
 		EventType:     common.EventProcessingFailed,
 		SchemaVersion: 1,
 		Payload:       model.PaymentProcessingStarted{PaymentID: paymentID},
@@ -83,10 +93,13 @@ func PublishProcessingFailed(producer sarama.SyncProducer, paymentID string) err
 	return fmt.Errorf("%s: %w", op, err)
 }
 
-func PublishProcessingSucceeded(producer sarama.SyncProducer, paymentID string) error {
+func PublishProcessingSucceeded(ctx context.Context, producer sarama.SyncProducer, paymentID string) error {
 	const op = "PublishProcessingSucceeded"
 
-	err := Publish(producer, model.EventEnvelope[model.PaymentProcessingSucceeded]{
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
+
+	err := Publish(ctx, producer, model.EventEnvelope[model.PaymentProcessingSucceeded]{
 		EventType:     common.EventProcessingSucceeded,
 		SchemaVersion: 1,
 		Payload:       model.PaymentProcessingSucceeded{PaymentID: paymentID},
@@ -95,10 +108,13 @@ func PublishProcessingSucceeded(producer sarama.SyncProducer, paymentID string) 
 	return fmt.Errorf("%s: %w", op, err)
 }
 
-func PublishPaymentCreated(producer sarama.SyncProducer, payment model.Payment) error {
+func PublishPaymentCreated(ctx context.Context, producer sarama.SyncProducer, payment model.Payment) error {
 	const op = "PublishPaymentCreated"
 
-	err := Publish(producer, model.EventEnvelope[model.Payment]{
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
+
+	err := Publish(ctx, producer, model.EventEnvelope[model.Payment]{
 		EventType:     common.EventPaymentCreated,
 		SchemaVersion: 1,
 		Payload:       payment,
@@ -107,48 +123,61 @@ func PublishPaymentCreated(producer sarama.SyncProducer, payment model.Payment) 
 	return fmt.Errorf("%s: %w", op, err)
 }
 
-func ProcessPayment(producer sarama.SyncProducer, payment model.Payment) error {
+func ProcessPayment(ctx context.Context, producer sarama.SyncProducer, payment model.Payment) error {
 	const op = "ProcessPayment"
 
-	PublishProcessingStarted(producer, payment.ID)
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
+
+	PublishProcessingStarted(ctx, producer, payment.ID)
 
 	provider, ok := paymentProviders[payment.Provider]
 	if !ok {
-		PublishProcessingFailed(producer, payment.ID)
+		PublishProcessingFailed(ctx, producer, payment.ID)
 		return fmt.Errorf("%s: %w", op, ErrUnknownPaymentProvider)
 	}
 
-	err := provider.Pay(context.Background(), payment.Amount, payment.Currency)
+	err := provider.Pay(ctx, payment.Amount, payment.Currency)
 	if err != nil {
-		PublishProcessingFailed(producer, payment.ID)
+		PublishProcessingFailed(ctx, producer, payment.ID)
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	PublishProcessingSucceeded(producer, payment.ID)
+	PublishProcessingSucceeded(ctx, producer, payment.ID)
 
 	return nil
 }
 
-func Handle_CommandCreatePayment(w *Worker, command model.CommandEnvelope[json.RawMessage]) {
+func Handle_CommandCreatePayment(ctx context.Context, w *Worker, command model.CommandEnvelope[json.RawMessage]) {
+	const op = "Handle_CommandCreatePayment"
+
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
+
 	var payment model.Payment
 	if err := json.Unmarshal(command.Payload, &payment); err != nil {
 		w.logger.Error("malformed command payload", "error", err)
 		return
 	}
 
-	w.commandRepository.Save(context.Background(), &model.Command{
+	w.commandRepository.Save(ctx, &model.Command{
 		ID:          uuid.NewString(),
 		CommandType: common.CommandCreatePayment,
 		Payload:     payment,
 		CreatedAt:   time.Now(),
 	})
 
-	PublishPaymentCreated(w.producer, payment)
+	PublishPaymentCreated(ctx, w.producer, payment)
 
-	ProcessPayment(w.producer, payment)
+	ProcessPayment(ctx, w.producer, payment)
 }
 
-func Handle_EventPaymentCreated(w *Worker, event model.EventEnvelope[json.RawMessage]) {
+func Handle_EventPaymentCreated(ctx context.Context, w *Worker, event model.EventEnvelope[json.RawMessage]) {
+	const op = "Handle_EventPaymentCreated"
+
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
+
 	var payment model.Payment
 	if err := json.Unmarshal(event.Payload, &payment); err != nil {
 		w.logger.Error("malformed event payload", "error", err)
@@ -156,10 +185,10 @@ func Handle_EventPaymentCreated(w *Worker, event model.EventEnvelope[json.RawMes
 	}
 
 	// FIXME: no exception handling
-	w.paymentRepository.Save(context.Background(), &payment)
+	w.paymentRepository.Save(ctx, &payment)
 
 	// FIXME: no exception handling
-	w.eventRepository.Save(context.Background(), &model.Event{
+	w.eventRepository.Save(ctx, &model.Event{
 		ID:        uuid.NewString(),
 		EventType: event.EventType,
 		PaymentID: payment.ID,
@@ -168,14 +197,19 @@ func Handle_EventPaymentCreated(w *Worker, event model.EventEnvelope[json.RawMes
 	})
 }
 
-func Handle_EventPaymentProcessingStarted(w *Worker, event model.EventEnvelope[json.RawMessage]) {
+func Handle_EventPaymentProcessingStarted(ctx context.Context, w *Worker, event model.EventEnvelope[json.RawMessage]) {
+	const op = "Handle_EventPaymentProcessingStarted"
+
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
+
 	var payload model.PaymentProcessingStarted
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		w.logger.Error("malformed event payload", "error", err)
 		return
 	}
 
-	payment, err := w.paymentRepository.GetByID(context.Background(), payload.PaymentID)
+	payment, err := w.paymentRepository.GetByID(ctx, payload.PaymentID)
 	if err != nil {
 		w.logger.Error("payment not found", "error", err)
 		return
@@ -183,9 +217,9 @@ func Handle_EventPaymentProcessingStarted(w *Worker, event model.EventEnvelope[j
 
 	payment.Status = common.StatusProcessing
 
-	w.paymentRepository.Save(context.Background(), payment)
+	w.paymentRepository.Save(ctx, payment)
 
-	w.eventRepository.Save(context.Background(), &model.Event{
+	w.eventRepository.Save(ctx, &model.Event{
 		ID:        uuid.NewString(),
 		EventType: event.EventType,
 		PaymentID: payment.ID,
@@ -194,14 +228,19 @@ func Handle_EventPaymentProcessingStarted(w *Worker, event model.EventEnvelope[j
 	})
 }
 
-func Handle_EventProcessingFailed(w *Worker, event model.EventEnvelope[json.RawMessage]) {
+func Handle_EventProcessingFailed(ctx context.Context, w *Worker, event model.EventEnvelope[json.RawMessage]) {
+	const op = "Handle_EventProcessingFailed"
+
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
+
 	var payload model.PaymentProcessingFailed
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		w.logger.Error("malformed event payload", "error", err)
 		return
 	}
 
-	payment, err := w.paymentRepository.GetByID(context.Background(), payload.PaymentID)
+	payment, err := w.paymentRepository.GetByID(ctx, payload.PaymentID)
 	if err != nil {
 		w.logger.Error("payment not found", "error", err)
 		return
@@ -209,9 +248,9 @@ func Handle_EventProcessingFailed(w *Worker, event model.EventEnvelope[json.RawM
 
 	payment.Status = common.StatusFailed
 
-	w.paymentRepository.Save(context.Background(), payment)
+	w.paymentRepository.Save(ctx, payment)
 
-	w.eventRepository.Save(context.Background(), &model.Event{
+	w.eventRepository.Save(ctx, &model.Event{
 		ID:        uuid.NewString(),
 		EventType: event.EventType,
 		PaymentID: payment.ID,
@@ -220,14 +259,19 @@ func Handle_EventProcessingFailed(w *Worker, event model.EventEnvelope[json.RawM
 	})
 }
 
-func Handle_EventProcessingSucceeded(w *Worker, event model.EventEnvelope[json.RawMessage]) {
+func Handle_EventProcessingSucceeded(ctx context.Context, w *Worker, event model.EventEnvelope[json.RawMessage]) {
+	const op = "Handle_EventProcessingFailed"
+
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
+
 	var payload model.PaymentProcessingSucceeded
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		w.logger.Error("malformed event payload", "error", err)
 		return
 	}
 
-	payment, err := w.paymentRepository.GetByID(context.Background(), payload.PaymentID)
+	payment, err := w.paymentRepository.GetByID(ctx, payload.PaymentID)
 	if err != nil {
 		w.logger.Error("payment not found", "error", err)
 		return
@@ -235,9 +279,9 @@ func Handle_EventProcessingSucceeded(w *Worker, event model.EventEnvelope[json.R
 
 	payment.Status = common.StatusCompleted
 
-	w.paymentRepository.Save(context.Background(), payment)
+	w.paymentRepository.Save(ctx, payment)
 
-	w.eventRepository.Save(context.Background(), &model.Event{
+	w.eventRepository.Save(ctx, &model.Event{
 		ID:        uuid.NewString(),
 		EventType: event.EventType,
 		PaymentID: payment.ID,
@@ -256,6 +300,11 @@ type Worker struct {
 }
 
 func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
+	const op = "Worker.HandleCommandMessage"
+
+	ctx, span := telemetry.Tracer.Start(context.Background(), op)
+	defer span.End()
+
 	var command model.CommandEnvelope[json.RawMessage]
 	if err := json.Unmarshal(message.Value, &command); err != nil {
 		w.logger.Error("malformed command", "error", err)
@@ -264,13 +313,18 @@ func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
 
 	switch command.CommandType {
 	case common.CommandCreatePayment:
-		Handle_CommandCreatePayment(w, command)
+		Handle_CommandCreatePayment(ctx, w, command)
 	default:
 		w.logger.Error("unknown command type", "command_type", command.CommandType)
 	}
 }
 
 func (w *Worker) HandleEventMessage(message *sarama.ConsumerMessage) {
+	const op = "Worker.HandleEventMessage"
+
+	ctx, span := telemetry.Tracer.Start(context.Background(), op)
+	defer span.End()
+
 	var event model.EventEnvelope[json.RawMessage]
 	if err := json.Unmarshal(message.Value, &event); err != nil {
 		w.logger.Error("malformed event", "error", err)
@@ -279,13 +333,13 @@ func (w *Worker) HandleEventMessage(message *sarama.ConsumerMessage) {
 
 	switch event.EventType {
 	case common.EventPaymentCreated:
-		Handle_EventPaymentCreated(w, event)
+		Handle_EventPaymentCreated(ctx, w, event)
 	case common.EventProcessingStarted:
-		Handle_EventPaymentProcessingStarted(w, event)
+		Handle_EventPaymentProcessingStarted(ctx, w, event)
 	case common.EventProcessingFailed:
-		Handle_EventProcessingFailed(w, event)
+		Handle_EventProcessingFailed(ctx, w, event)
 	case common.EventProcessingSucceeded:
-		Handle_EventProcessingSucceeded(w, event)
+		Handle_EventProcessingSucceeded(ctx, w, event)
 	default:
 		w.logger.Error("unknown event type", "event_type", event.EventType)
 	}
@@ -293,7 +347,7 @@ func (w *Worker) HandleEventMessage(message *sarama.ConsumerMessage) {
 }
 
 func run() error {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := slog.New(logging.NewOtelID(slog.NewJSONHandler(os.Stdout, nil)))
 
 	logger.Info("assign signal handler")
 	sig := make(chan os.Signal, 1)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
+	"github.com/nkostiuchenko/payment-gateway/internal/telemetry"
 )
 
 type CommandRepository struct {
@@ -14,6 +15,9 @@ type CommandRepository struct {
 
 func (r *CommandRepository) Save(ctx context.Context, command *model.Command) error {
 	const op = "CommandRepository.Save"
+
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
 
 	const query = `
 	INSERT INTO processed_commands (id, command_type, payload, created_at)

@@ -7,9 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/codes"
+
 	"github.com/google/uuid"
 	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
+	"github.com/nkostiuchenko/payment-gateway/internal/telemetry"
 )
 
 type PaymentRepository interface {
@@ -35,6 +38,9 @@ type CreatePaymentInput struct {
 
 func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (*model.Payment, error) {
 	const op = "PaymentService.Create"
+
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
 
 	if input.Amount <= 0 {
 		return nil, fmt.Errorf("%s: amount must be positive: %w", op, ErrInvalidPayment)
@@ -63,10 +69,14 @@ func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (
 
 	js, err := json.Marshal(command)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("%s: marshaling of command: %w", op, err)
 	}
 
 	if err := s.broker.Publish(ctx, common.CommandsTopic, js); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("%s: publish create payment: %w", op, err)
 	}
 
@@ -76,12 +86,19 @@ func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (
 func (s *PaymentService) GetByID(ctx context.Context, id string) (*model.Payment, error) {
 	const op = "PaymentService.GetByID"
 
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
+
 	if _, err := uuid.Parse(id); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("%s: %w", op, ErrInvalidId)
 	}
 
 	payment, err := s.repo.GetByID(ctx, id)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 

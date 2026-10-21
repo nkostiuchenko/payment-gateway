@@ -18,6 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nkostiuchenko/payment-gateway/internal/broker"
 	"github.com/nkostiuchenko/payment-gateway/internal/config"
@@ -55,10 +56,17 @@ func NewServer(logger *slog.Logger, paymentService PaymentService) (*Server, err
 	return &Server{Logger: logger, paymentService: paymentService}, nil
 }
 
-func (s *Server) getPaymentHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) getPayment(w http.ResponseWriter, r *http.Request) {
+	const op = "Server.getPayment"
+
+	ctx, span := telemetry.Tracer.Start(r.Context(), "get-payment")
+	defer span.End()
+
 	id := r.PathValue("id")
 
-	payment, err := s.paymentService.GetByID(r.Context(), id)
+	span.SetAttributes(attribute.String("payment.id", id))
+
+	payment, err := s.paymentService.GetByID(ctx, id)
 
 	if errors.Is(err, service.ErrInvalidId) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -90,6 +98,9 @@ func (s *Server) getPaymentHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 	const op = "Server.createPayment"
 
+	ctx, span := telemetry.Tracer.Start(r.Context(), "create-payment")
+	defer span.End()
+
 	type Request struct {
 		Amount   *int             `json:"amount"`
 		Currency *string          `json:"currency"`
@@ -106,11 +117,12 @@ func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 
 	if request.Amount == nil || request.Provider == nil || request.Currency == nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(dto.ErrorResponse{Error: "amount, provider and currency must be specified"})
+		err := fmt.Errorf("amount, provider and currency must be specified")
+		json.NewEncoder(w).Encode(dto.ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	payment, err := s.paymentService.Create(r.Context(), service.CreatePaymentInput{
+	payment, err := s.paymentService.Create(ctx, service.CreatePaymentInput{
 		Amount:   *request.Amount,
 		Provider: *request.Provider,
 		Currency: *request.Currency,
@@ -176,7 +188,7 @@ func run() error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /payments", server.createPayment)
-	mux.HandleFunc("GET /payments/{id}", server.getPaymentHandler)
+	mux.HandleFunc("GET /payments/{id}", server.getPayment)
 
 	handler := middleware.ContentJSON(mux)
 	handler = middleware.RequestLogger(logger)(handler)

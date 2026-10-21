@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
+	"github.com/nkostiuchenko/payment-gateway/internal/telemetry"
 )
 
 type EventRepository struct {
@@ -14,6 +15,9 @@ type EventRepository struct {
 
 func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 	const op = "EventRepository.Save"
+
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
 
 	const query = `
 	INSERT INTO payment_events (id, event_type, payment_id, payload, created_at)

@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 
+	"go.opentelemetry.io/otel/codes"
+
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
+	"github.com/nkostiuchenko/payment-gateway/internal/telemetry"
 )
 
 type PaymentRepository struct {
@@ -16,6 +19,9 @@ type PaymentRepository struct {
 
 func (r *PaymentRepository) Save(ctx context.Context, payment *model.Payment) error {
 	const op = "PaymentRepository.Save"
+
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
 
 	const paymentsQuery = `
 	INSERT INTO payments (id, amount, currency, provider, status, metadata)
@@ -41,6 +47,8 @@ func (r *PaymentRepository) Save(ctx context.Context, payment *model.Payment) er
 	)
 
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("%s: insert payment: %w", op, err)
 	}
 
@@ -49,6 +57,9 @@ func (r *PaymentRepository) Save(ctx context.Context, payment *model.Payment) er
 
 func (r *PaymentRepository) GetByID(ctx context.Context, id string) (*model.Payment, error) {
 	const op = "PaymentRepository.GetByID"
+
+	ctx, span := telemetry.Tracer.Start(ctx, op)
+	defer span.End()
 
 	const query = `
 	SELECT id, amount, currency, provider, status, metadata, created_at, updated_at

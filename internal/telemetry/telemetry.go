@@ -20,19 +20,23 @@ const (
 var Tracer = otel.Tracer(appName)
 
 func InitTracing(ctx context.Context) (func(context.Context) error, error) {
+	const op = "InitTracing"
+
 	exporter, err := otlptracehttp.New(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("create OTLP exporter: %w", err)
+		return nil, fmt.Errorf("%s: create OTLP exporter: %w", op, err)
 	}
 
-	res, err := sdkresource.New(ctx,
-		sdkresource.WithAttributes(
+	res, err := sdkresource.Merge(
+		sdkresource.Default(),
+		sdkresource.NewSchemaless(
 			attribute.String("service.name", appName),
 			attribute.String("deployment.environment.name", "development"),
 		),
 	)
+
 	if err != nil {
-		return nil, fmt.Errorf("create resource: %w", err)
+		return nil, fmt.Errorf("%s: create resource: %w", op, err)
 	}
 
 	tp := sdktrace.NewTracerProvider(
