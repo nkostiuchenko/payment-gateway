@@ -11,13 +11,14 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	sdkresource "go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
 	appName = "payment-service"
 )
 
-var Tracer = otel.Tracer(appName)
+var Tracer trace.Tracer
 
 func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 	const op = "InitTracing"
@@ -51,6 +52,8 @@ func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 			propagation.Baggage{},
 		),
 	)
+
+	Tracer = tp.Tracer(appName)
 
 	return func(ctx context.Context) error { return tp.Shutdown(ctx) }, nil
 }
