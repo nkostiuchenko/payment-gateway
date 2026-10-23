@@ -57,7 +57,11 @@ func PublishProcessingStarted(ctx context.Context, producer sarama.SyncProducer,
 		Payload:       model.PaymentProcessingStarted{PaymentID: paymentID},
 	})
 
-	return fmt.Errorf("%s: %w", op, err)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
 }
 
 func PublishProcessingFailed(ctx context.Context, producer sarama.SyncProducer, paymentID string) error {
@@ -72,7 +76,11 @@ func PublishProcessingFailed(ctx context.Context, producer sarama.SyncProducer, 
 		Payload:       model.PaymentProcessingStarted{PaymentID: paymentID},
 	})
 
-	return fmt.Errorf("%s: %w", op, err)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
 }
 
 func PublishProcessingSucceeded(ctx context.Context, producer sarama.SyncProducer, paymentID string) error {
@@ -87,7 +95,11 @@ func PublishProcessingSucceeded(ctx context.Context, producer sarama.SyncProduce
 		Payload:       model.PaymentProcessingSucceeded{PaymentID: paymentID},
 	})
 
-	return fmt.Errorf("%s: %w", op, err)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
 }
 
 func PublishPaymentCreated(ctx context.Context, producer sarama.SyncProducer, payment model.Payment) error {
@@ -102,7 +114,11 @@ func PublishPaymentCreated(ctx context.Context, producer sarama.SyncProducer, pa
 		Payload:       payment,
 	})
 
-	return fmt.Errorf("%s: %w", op, err)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
 }
 
 func ProcessPayment(ctx context.Context, producer sarama.SyncProducer, payment model.Payment) error {
