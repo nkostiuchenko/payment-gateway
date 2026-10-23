@@ -15,6 +15,9 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/nkostiuchenko/payment-gateway/internal/logging"
+	"github.com/nkostiuchenko/payment-gateway/internal/middleware"
 )
 
 const (
@@ -115,18 +118,17 @@ func handlePay(w http.ResponseWriter, r *http.Request) {
 }
 
 func run() error {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	slog.SetDefault(logger)
+	slog.SetDefault(slog.New(logging.NewRequestIDHandler(slog.NewJSONHandler(os.Stdout, nil))))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /pay", handlePay)
+	mux.Handle("POST /pay", middleware.RequestID(middleware.RequestLogger(slog.Default())(http.HandlerFunc(handlePay))))
 
 	httpServer := http.Server{Addr: ":8080", Handler: mux}
 
 	serverErr := make(chan error, 1)
 
 	go func() {
-		logger.Info("starting HTTP server", "address", httpServer.Addr)
+		slog.Info("starting HTTP server", "address", httpServer.Addr)
 		serverErr <- httpServer.ListenAndServe()
 	}()
 
@@ -134,12 +136,12 @@ func run() error {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 
 	received := <-sig
-	logger.Info("shutdown signal received", "signal", received.String())
+	slog.Info("shutdown signal received", "signal", received.String())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	logger.Info("shutting down http server")
+	slog.Info("shutting down http server")
 	if err := httpServer.Shutdown(ctx); err != nil {
 		return fmt.Errorf("server shutdown failed: %w", err)
 	}
