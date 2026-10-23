@@ -17,9 +17,9 @@ import (
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/nkostiuchenko/payment-gateway/internal/broker"
 	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/config"
 	"github.com/nkostiuchenko/payment-gateway/internal/logging"
@@ -43,46 +43,13 @@ var (
 	}
 )
 
-func Publish[T any](ctx context.Context, producer sarama.SyncProducer, envelope model.EventEnvelope[T]) error {
-	const op = "Publish"
-
-	ctx, span := telemetry.Tracer.Start(ctx, op, trace.WithSpanKind(trace.SpanKindProducer))
-	defer span.End()
-
-	js, err := json.Marshal(envelope)
-	if err != nil {
-		err = fmt.Errorf("%s: %w", op, err)
-		span.SetStatus(codes.Error, err.Error())
-		span.RecordError(err)
-		return err
-	}
-
-	message := &sarama.ProducerMessage{
-		Topic: common.EventsTopic,
-		Value: sarama.ByteEncoder(js),
-	}
-
-	otel.GetTextMapPropagator().Inject(ctx, telemetry.ProducerCarrier{Message: message})
-
-	_, _, err = producer.SendMessage(message)
-
-	if err != nil {
-		err = fmt.Errorf("%s: %w", op, err)
-		span.SetStatus(codes.Error, err.Error())
-		span.RecordError(err)
-		return err
-	}
-
-	return nil
-}
-
 func PublishProcessingStarted(ctx context.Context, producer sarama.SyncProducer, paymentID string) error {
 	const op = "PublishProcessingStarted"
 
 	ctx, span := telemetry.Tracer.Start(ctx, op)
 	defer span.End()
 
-	err := Publish(ctx, producer, model.EventEnvelope[model.PaymentProcessingStarted]{
+	err := broker.Publish(ctx, common.EventsTopic, producer, model.EventEnvelope[model.PaymentProcessingStarted]{
 		EventType:     common.EventProcessingStarted,
 		SchemaVersion: 1,
 		Payload:       model.PaymentProcessingStarted{PaymentID: paymentID},
@@ -97,7 +64,7 @@ func PublishProcessingFailed(ctx context.Context, producer sarama.SyncProducer, 
 	ctx, span := telemetry.Tracer.Start(ctx, op)
 	defer span.End()
 
-	err := Publish(ctx, producer, model.EventEnvelope[model.PaymentProcessingStarted]{
+	err := broker.Publish(ctx, common.EventsTopic, producer, model.EventEnvelope[model.PaymentProcessingStarted]{
 		EventType:     common.EventProcessingFailed,
 		SchemaVersion: 1,
 		Payload:       model.PaymentProcessingStarted{PaymentID: paymentID},
@@ -112,7 +79,7 @@ func PublishProcessingSucceeded(ctx context.Context, producer sarama.SyncProduce
 	ctx, span := telemetry.Tracer.Start(ctx, op)
 	defer span.End()
 
-	err := Publish(ctx, producer, model.EventEnvelope[model.PaymentProcessingSucceeded]{
+	err := broker.Publish(ctx, common.EventsTopic, producer, model.EventEnvelope[model.PaymentProcessingSucceeded]{
 		EventType:     common.EventProcessingSucceeded,
 		SchemaVersion: 1,
 		Payload:       model.PaymentProcessingSucceeded{PaymentID: paymentID},
@@ -127,7 +94,7 @@ func PublishPaymentCreated(ctx context.Context, producer sarama.SyncProducer, pa
 	ctx, span := telemetry.Tracer.Start(ctx, op)
 	defer span.End()
 
-	err := Publish(ctx, producer, model.EventEnvelope[model.Payment]{
+	err := broker.Publish(ctx, common.EventsTopic, producer, model.EventEnvelope[model.Payment]{
 		EventType:     common.EventPaymentCreated,
 		SchemaVersion: 1,
 		Payload:       payment,
