@@ -3,6 +3,7 @@ package common
 const (
 	CommandsTopic = "payment.commands"
 	EventsTopic   = "payment.events"
+	DLQTopic      = "payment.dlq"
 )
 
 const (

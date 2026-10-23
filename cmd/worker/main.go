@@ -155,6 +155,7 @@ func Handle_CommandCreatePayment(ctx context.Context, w *Worker, command model.C
 	var payment model.Payment
 	if err := json.Unmarshal(command.Payload, &payment); err != nil {
 		w.logger.Error("malformed command payload", "error", err)
+		broker.Publish(ctx, common.DLQTopic, w.producer, command)
 		return
 	}
 
@@ -179,6 +180,7 @@ func Handle_EventPaymentCreated(ctx context.Context, w *Worker, event model.Even
 	var payment model.Payment
 	if err := json.Unmarshal(event.Payload, &payment); err != nil {
 		w.logger.Error("malformed event payload", "error", err)
+		broker.Publish(ctx, common.DLQTopic, w.producer, event)
 		return
 	}
 
@@ -204,6 +206,7 @@ func Handle_EventPaymentProcessingStarted(ctx context.Context, w *Worker, event 
 	var payload model.PaymentProcessingStarted
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		w.logger.Error("malformed event payload", "error", err)
+		broker.Publish(ctx, common.DLQTopic, w.producer, event)
 		return
 	}
 
@@ -235,6 +238,7 @@ func Handle_EventProcessingFailed(ctx context.Context, w *Worker, event model.Ev
 	var payload model.PaymentProcessingFailed
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		w.logger.Error("malformed event payload", "error", err)
+		broker.Publish(ctx, common.DLQTopic, w.producer, event)
 		return
 	}
 
@@ -266,6 +270,7 @@ func Handle_EventProcessingSucceeded(ctx context.Context, w *Worker, event model
 	var payload model.PaymentProcessingSucceeded
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		w.logger.Error("malformed event payload", "error", err)
+		broker.Publish(ctx, common.DLQTopic, w.producer, event)
 		return
 	}
 
@@ -308,6 +313,7 @@ func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
 	var command model.CommandEnvelope[json.RawMessage]
 	if err := json.Unmarshal(message.Value, &command); err != nil {
 		w.logger.Error("malformed command", "error", err)
+		broker.PublishRaw(ctx, common.DLQTopic, w.producer, message.Value)
 		return
 	}
 
@@ -316,6 +322,7 @@ func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
 		Handle_CommandCreatePayment(ctx, w, command)
 	default:
 		w.logger.Error("unknown command type", "command_type", command.CommandType)
+		broker.PublishRaw(ctx, common.DLQTopic, w.producer, message.Value)
 	}
 }
 
@@ -330,6 +337,7 @@ func (w *Worker) HandleEventMessage(message *sarama.ConsumerMessage) {
 	var event model.EventEnvelope[json.RawMessage]
 	if err := json.Unmarshal(message.Value, &event); err != nil {
 		w.logger.Error("malformed event", "error", err)
+		broker.PublishRaw(ctx, common.DLQTopic, w.producer, message.Value)
 		return
 	}
 
@@ -344,6 +352,7 @@ func (w *Worker) HandleEventMessage(message *sarama.ConsumerMessage) {
 		Handle_EventProcessingSucceeded(ctx, w, event)
 	default:
 		w.logger.Error("unknown event type", "event_type", event.EventType)
+		broker.PublishRaw(ctx, common.DLQTopic, w.producer, message.Value)
 	}
 
 }
