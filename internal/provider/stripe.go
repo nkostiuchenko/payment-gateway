@@ -1,41 +1,54 @@
 package provider
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
-	"time"
+	"net/http"
+
+	"github.com/nkostiuchenko/payment-gateway/internal/config"
 )
 
 var ErrPaymentFailed = errors.New("payment failed")
 
 type StripeProvider struct {
+	cfg config.Config
 }
 
-func (s *StripeProvider) Pay(ctx context.Context, amount int, currency string) error {
+func (s *StripeProvider) Pay(ctx context.Context, amount int, currency string, webhook string) error {
 	const op = "StripeProvider.Pay"
 
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+	type Body struct {
+		Amount   int    `json:"amount"`
+		Currency string `json:"currency"`
+		Webhook  string `json:"webhook"`
 	}
 
-	delay := rand.Intn(5000)
-	isError := rand.Float64() <= 0.1
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(time.Duration(delay) * time.Millisecond):
+	body := Body{Amount: amount, Currency: currency, Webhook: webhook}
+	js, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("%s: failed to marshal body: %w", op, err)
 	}
 
-	if isError {
-		return fmt.Errorf("%s: %w", op, ErrPaymentFailed)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.StripeURL+"/pay", bytes.NewReader(js))
+	if err != nil {
+		return fmt.Errorf("%s: failed to create request: %w", op, err)
 	}
+
+	client := &http.Client{}
+
+	response, err := client.Do(request)
+	if err != nil {
+		return fmt.Errorf("%s: failed to send request: %w", op, err)
+	}
+
+	defer response.Body.Close()
 
 	return nil
 }
 
-func NewStripeProvider() *StripeProvider {
-	return &StripeProvider{}
+func NewStripeProvider(cfg config.Config) *StripeProvider {
+	return &StripeProvider{cfg: cfg}
 }

@@ -30,17 +30,11 @@ import (
 )
 
 type Provider interface {
-	Pay(ctx context.Context, amount int, currency string) error
+	Pay(ctx context.Context, amount int, currency string, webhook string) error
 }
 
 var (
 	ErrUnknownPaymentProvider = errors.New("unknown payment provider")
-)
-
-var (
-	paymentProviders = map[string]Provider{
-		"stripe": provider.NewStripeProvider(),
-	}
 )
 
 var tracer = otel.Tracer("github.com/nkostiuchenko/payment-gateway/cmd/worker")
@@ -121,7 +115,7 @@ func PublishPaymentCreated(ctx context.Context, producer sarama.SyncProducer, pa
 	return nil
 }
 
-func ProcessPayment(ctx context.Context, producer sarama.SyncProducer, payment model.Payment) error {
+func (w *Worker) ProcessPayment(ctx context.Context, producer sarama.SyncProducer, payment model.Payment) error {
 	const op = "ProcessPayment"
 
 	ctx, span := tracer.Start(ctx, op)
@@ -129,19 +123,19 @@ func ProcessPayment(ctx context.Context, producer sarama.SyncProducer, payment m
 
 	PublishProcessingStarted(ctx, producer, payment.ID)
 
-	provider, ok := paymentProviders[payment.Provider]
+	provider, ok := w.paymentProviders[payment.Provider]
 	if !ok {
 		PublishProcessingFailed(ctx, producer, payment.ID)
 		return fmt.Errorf("%s: %w", op, ErrUnknownPaymentProvider)
 	}
 
-	err := provider.Pay(ctx, payment.Amount, payment.Currency)
+	webhook := w.cfg.WebhookURL + "/" + payment.ID
+
+	err := provider.Pay(ctx, payment.Amount, payment.Currency, webhook)
 	if err != nil {
 		PublishProcessingFailed(ctx, producer, payment.ID)
 		return fmt.Errorf("%s: %w", op, err)
 	}
-
-	PublishProcessingSucceeded(ctx, producer, payment.ID)
 
 	return nil
 }
@@ -168,7 +162,7 @@ func Handle_CommandCreatePayment(ctx context.Context, w *Worker, command model.C
 
 	PublishPaymentCreated(ctx, w.producer, payment)
 
-	ProcessPayment(ctx, w.producer, payment)
+	w.ProcessPayment(ctx, w.producer, payment)
 }
 
 func Handle_EventPaymentCreated(ctx context.Context, w *Worker, event model.EventEnvelope[json.RawMessage]) {
@@ -294,10 +288,12 @@ func Handle_EventProcessingSucceeded(ctx context.Context, w *Worker, event model
 }
 
 type Worker struct {
+	cfg               config.Config
 	logger            *slog.Logger
 	paymentRepository *repository.PaymentRepository
 	eventRepository   *repository.EventRepository
 	commandRepository *repository.CommandRepository
+	paymentProviders  map[string]Provider
 	producer          sarama.SyncProducer
 	wg                *sync.WaitGroup
 }
@@ -387,6 +383,8 @@ func run() error {
 	commandRepository := repository.NewCommandRepository(db)
 	eventRepository := repository.NewEventRepository(db)
 
+	paymentProviders := map[string]Provider{"stripe": provider.NewStripeProvider(cfg)}
+
 	config := sarama.NewConfig()
 	config.Producer.Return.Successes = true
 
@@ -413,12 +411,14 @@ func run() error {
 	}
 
 	worker := Worker{
+		cfg:               cfg,
 		wg:                &sync.WaitGroup{},
 		logger:            logger,
 		producer:          producer,
 		paymentRepository: paymentRepository,
 		commandRepository: commandRepository,
 		eventRepository:   eventRepository,
+		paymentProviders:  paymentProviders,
 	}
 
 loop:

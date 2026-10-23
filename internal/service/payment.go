@@ -104,6 +104,43 @@ func (s *PaymentService) GetByID(ctx context.Context, id string) (*model.Payment
 	return payment, nil
 }
 
+func (s *PaymentService) Webhook(ctx context.Context, id string) error {
+	const op = "PaymentService.Webhook"
+
+	ctx, span := tracer.Start(ctx, op)
+	defer span.End()
+
+	if _, err := uuid.Parse(id); err != nil {
+		err = fmt.Errorf("%s: %w", op, ErrInvalidId)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
+	event := model.EventEnvelope[model.PaymentProcessingSucceeded]{
+		EventType:     common.EventProcessingSucceeded,
+		SchemaVersion: 1,
+		Payload:       model.PaymentProcessingSucceeded{PaymentID: id},
+	}
+
+	js, err := json.Marshal(event)
+	if err != nil {
+		err = fmt.Errorf("%s: marshaling of event: %w", op, err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
+	if err := s.broker.Publish(ctx, common.EventsTopic, js); err != nil {
+		err = fmt.Errorf("%s: publish event failed: %w", op, err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
+	return nil
+}
+
 func NewPaymentService(repo PaymentRepository, broker Broker) PaymentService {
 	return PaymentService{repo: repo, broker: broker}
 }

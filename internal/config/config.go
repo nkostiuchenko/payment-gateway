@@ -10,6 +10,8 @@ type Config struct {
 	DatabaseURL string `env:"DATABASE_URL,required"`
 	Debug       bool   `env:"DEBUG" envDefault:"false"`
 	KafkaURL    string `env:"KAFKA_URL,required"`
+	StripeURL   string `env:"STRIPE_URL,required"`
+	WebhookURL  string `env:"WEBHOOK_URL,required"`
 }
 
 func Load() (Config, error) {

@@ -36,6 +36,7 @@ import (
 type PaymentService interface {
 	GetByID(ctx context.Context, id string) (*model.Payment, error)
 	Create(ctx context.Context, input service.CreatePaymentInput) (*model.Payment, error)
+	Webhook(ctx context.Context, id string) error
 }
 
 type Server struct {
@@ -148,6 +149,19 @@ func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(payment)
 }
 
+func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
+	const op = "Server.createPayment"
+
+	ctx, span := tracer.Start(r.Context(), op)
+	defer span.End()
+
+	id := r.PathValue("id")
+
+	span.SetAttributes(attribute.String("payment.id", id))
+
+	s.paymentService.Webhook(ctx, id)
+}
+
 func run() error {
 	logger := slog.New(logging.NewOtelID(logging.NewRequestIDHandler(slog.NewJSONHandler(os.Stdout, nil))))
 
@@ -192,6 +206,7 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /payments", server.createPayment)
 	mux.HandleFunc("GET /payments/{id}", server.getPayment)
+	mux.HandleFunc("POST /webhook/{id}", server.handleWebhook)
 
 	handler := middleware.ContentJSON(mux)
 	handler = middleware.RequestLogger(logger)(handler)
