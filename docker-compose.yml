@@ -27,6 +27,21 @@ services:
       postgres:
         condition: service_healthy
 
+  stripe:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: stripe
+    env_file:
+      - .env
+    ports:
+      - "8081:8080"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   postgres:
     image: postgres:17
     environment:
