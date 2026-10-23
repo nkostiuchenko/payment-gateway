@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
-	"github.com/nkostiuchenko/payment-gateway/internal/telemetry"
 )
 
 type EventRepository struct {
@@ -16,7 +15,7 @@ type EventRepository struct {
 func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 	const op = "EventRepository.Save"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op)
+	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
 	const query = `

@@ -13,8 +13,6 @@ import (
 	"github.com/nkostiuchenko/payment-gateway/internal/telemetry"
 )
 
-var tracer = otel.Tracer("github.com/nkostiuchenko/payment-gateway/internal/broker")
-
 func Publish[T any](ctx context.Context, topic string, producer sarama.SyncProducer, message T) error {
 	const op = "Publish"
 

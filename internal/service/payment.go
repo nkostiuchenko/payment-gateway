@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
-	"github.com/nkostiuchenko/payment-gateway/internal/telemetry"
 )
 
 type PaymentRepository interface {
@@ -39,7 +38,7 @@ type CreatePaymentInput struct {
 func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (*model.Payment, error) {
 	const op = "PaymentService.Create"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op)
+	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
 	if input.Amount <= 0 {
@@ -86,7 +85,7 @@ func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (
 func (s *PaymentService) GetByID(ctx context.Context, id string) (*model.Payment, error) {
 	const op = "PaymentService.GetByID"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op)
+	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
 	if _, err := uuid.Parse(id); err != nil {

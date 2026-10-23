@@ -18,6 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nkostiuchenko/payment-gateway/internal/broker"
@@ -42,6 +43,8 @@ type Server struct {
 	paymentService PaymentService
 }
 
+var tracer = otel.Tracer("github.com/nkostiuchenko/payment-gateway/cmd/api")
+
 func NewServer(logger *slog.Logger, paymentService PaymentService) (*Server, error) {
 	const op = "NewServer"
 
@@ -59,7 +62,7 @@ func NewServer(logger *slog.Logger, paymentService PaymentService) (*Server, err
 func (s *Server) getPayment(w http.ResponseWriter, r *http.Request) {
 	const op = "Server.getPayment"
 
-	ctx, span := telemetry.Tracer.Start(r.Context(), "get-payment")
+	ctx, span := tracer.Start(r.Context(), "get-payment")
 	defer span.End()
 
 	id := r.PathValue("id")
@@ -98,7 +101,7 @@ func (s *Server) getPayment(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 	const op = "Server.createPayment"
 
-	ctx, span := telemetry.Tracer.Start(r.Context(), "create-payment")
+	ctx, span := tracer.Start(r.Context(), "create-payment")
 	defer span.End()
 
 	type Request struct {

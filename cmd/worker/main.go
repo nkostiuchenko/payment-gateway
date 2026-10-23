@@ -43,10 +43,12 @@ var (
 	}
 )
 
+var tracer = otel.Tracer("github.com/nkostiuchenko/payment-gateway/cmd/worker")
+
 func PublishProcessingStarted(ctx context.Context, producer sarama.SyncProducer, paymentID string) error {
 	const op = "PublishProcessingStarted"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op)
+	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
 	err := broker.Publish(ctx, common.EventsTopic, producer, model.EventEnvelope[model.PaymentProcessingStarted]{
@@ -61,7 +63,7 @@ func PublishProcessingStarted(ctx context.Context, producer sarama.SyncProducer,
 func PublishProcessingFailed(ctx context.Context, producer sarama.SyncProducer, paymentID string) error {
 	const op = "PublishProcessingFailed"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op)
+	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
 	err := broker.Publish(ctx, common.EventsTopic, producer, model.EventEnvelope[model.PaymentProcessingStarted]{
@@ -76,7 +78,7 @@ func PublishProcessingFailed(ctx context.Context, producer sarama.SyncProducer, 
 func PublishProcessingSucceeded(ctx context.Context, producer sarama.SyncProducer, paymentID string) error {
 	const op = "PublishProcessingSucceeded"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op)
+	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
 	err := broker.Publish(ctx, common.EventsTopic, producer, model.EventEnvelope[model.PaymentProcessingSucceeded]{
@@ -91,7 +93,7 @@ func PublishProcessingSucceeded(ctx context.Context, producer sarama.SyncProduce
 func PublishPaymentCreated(ctx context.Context, producer sarama.SyncProducer, payment model.Payment) error {
 	const op = "PublishPaymentCreated"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op)
+	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
 	err := broker.Publish(ctx, common.EventsTopic, producer, model.EventEnvelope[model.Payment]{
@@ -106,7 +108,7 @@ func PublishPaymentCreated(ctx context.Context, producer sarama.SyncProducer, pa
 func ProcessPayment(ctx context.Context, producer sarama.SyncProducer, payment model.Payment) error {
 	const op = "ProcessPayment"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op)
+	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
 	PublishProcessingStarted(ctx, producer, payment.ID)
@@ -131,7 +133,7 @@ func ProcessPayment(ctx context.Context, producer sarama.SyncProducer, payment m
 func Handle_CommandCreatePayment(ctx context.Context, w *Worker, command model.CommandEnvelope[json.RawMessage]) {
 	const op = "Handle_CommandCreatePayment"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op)
+	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
 	var payment model.Payment
@@ -155,7 +157,7 @@ func Handle_CommandCreatePayment(ctx context.Context, w *Worker, command model.C
 func Handle_EventPaymentCreated(ctx context.Context, w *Worker, event model.EventEnvelope[json.RawMessage]) {
 	const op = "Handle_EventPaymentCreated"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op)
+	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
 	var payment model.Payment
@@ -180,7 +182,7 @@ func Handle_EventPaymentCreated(ctx context.Context, w *Worker, event model.Even
 func Handle_EventPaymentProcessingStarted(ctx context.Context, w *Worker, event model.EventEnvelope[json.RawMessage]) {
 	const op = "Handle_EventPaymentProcessingStarted"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op)
+	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
 	var payload model.PaymentProcessingStarted
@@ -211,7 +213,7 @@ func Handle_EventPaymentProcessingStarted(ctx context.Context, w *Worker, event 
 func Handle_EventProcessingFailed(ctx context.Context, w *Worker, event model.EventEnvelope[json.RawMessage]) {
 	const op = "Handle_EventProcessingFailed"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op)
+	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
 	var payload model.PaymentProcessingFailed
@@ -242,7 +244,7 @@ func Handle_EventProcessingFailed(ctx context.Context, w *Worker, event model.Ev
 func Handle_EventProcessingSucceeded(ctx context.Context, w *Worker, event model.EventEnvelope[json.RawMessage]) {
 	const op = "Handle_EventProcessingFailed"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op)
+	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
 	var payload model.PaymentProcessingSucceeded
@@ -284,7 +286,7 @@ func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
 
 	ctx := otel.GetTextMapPropagator().Extract(context.Background(), telemetry.ConsumerCarrier{Message: message})
 
-	ctx, span := telemetry.Tracer.Start(ctx, op, trace.WithSpanKind(trace.SpanKindConsumer))
+	ctx, span := tracer.Start(ctx, op, trace.WithSpanKind(trace.SpanKindConsumer))
 	defer span.End()
 
 	var command model.CommandEnvelope[json.RawMessage]
@@ -306,7 +308,7 @@ func (w *Worker) HandleEventMessage(message *sarama.ConsumerMessage) {
 
 	ctx := otel.GetTextMapPropagator().Extract(context.Background(), telemetry.ConsumerCarrier{Message: message})
 
-	ctx, span := telemetry.Tracer.Start(ctx, op, trace.WithSpanKind(trace.SpanKindConsumer))
+	ctx, span := tracer.Start(ctx, op, trace.WithSpanKind(trace.SpanKindConsumer))
 	defer span.End()
 
 	var event model.EventEnvelope[json.RawMessage]

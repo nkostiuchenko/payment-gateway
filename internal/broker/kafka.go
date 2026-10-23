@@ -18,7 +18,7 @@ type Kafka struct {
 func (k *Kafka) Publish(ctx context.Context, topic string, content []byte) error {
 	const op = "Kafka.Publish"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op, trace.WithSpanKind(trace.SpanKindProducer))
+	ctx, span := tracer.Start(ctx, op, trace.WithSpanKind(trace.SpanKindProducer))
 	defer span.End()
 
 	message := &sarama.ProducerMessage{
