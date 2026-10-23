@@ -5,6 +5,10 @@ import (
 	"fmt"
 
 	"github.com/IBM/sarama"
+	"github.com/nkostiuchenko/payment-gateway/internal/telemetry"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Kafka struct {
@@ -14,12 +18,21 @@ type Kafka struct {
 func (k *Kafka) Publish(ctx context.Context, topic string, content []byte) error {
 	const op = "Kafka.Publish"
 
-	_, _, err := k.producer.SendMessage(&sarama.ProducerMessage{
+	ctx, span := telemetry.Tracer.Start(ctx, op, trace.WithSpanKind(trace.SpanKindProducer))
+	defer span.End()
+
+	message := &sarama.ProducerMessage{
 		Topic: topic,
 		Value: sarama.ByteEncoder(content),
-	})
+	}
+
+	otel.GetTextMapPropagator().Inject(ctx, telemetry.ProducerCarrier{Message: message})
+
+	_, _, err := k.producer.SendMessage(message)
 
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
 		return fmt.Errorf("%s: %w", op, err)
 	}
 

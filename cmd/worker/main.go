@@ -16,6 +16,9 @@ import (
 	"github.com/XSAM/otelsql"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/config"
@@ -43,21 +46,31 @@ var (
 func Publish[T any](ctx context.Context, producer sarama.SyncProducer, envelope model.EventEnvelope[T]) error {
 	const op = "Publish"
 
-	ctx, span := telemetry.Tracer.Start(ctx, op)
+	ctx, span := telemetry.Tracer.Start(ctx, op, trace.WithSpanKind(trace.SpanKindProducer))
 	defer span.End()
 
 	js, err := json.Marshal(envelope)
 	if err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+		err = fmt.Errorf("%s: %w", op, err)
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+		return err
 	}
 
-	_, _, err = producer.SendMessage(&sarama.ProducerMessage{
+	message := &sarama.ProducerMessage{
 		Topic: common.EventsTopic,
 		Value: sarama.ByteEncoder(js),
-	})
+	}
+
+	otel.GetTextMapPropagator().Inject(ctx, telemetry.ProducerCarrier{Message: message})
+
+	_, _, err = producer.SendMessage(message)
 
 	if err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+		err = fmt.Errorf("%s: %w", op, err)
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+		return err
 	}
 
 	return nil
@@ -302,7 +315,9 @@ type Worker struct {
 func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
 	const op = "Worker.HandleCommandMessage"
 
-	ctx, span := telemetry.Tracer.Start(context.Background(), op)
+	ctx := otel.GetTextMapPropagator().Extract(context.Background(), telemetry.ConsumerCarrier{Message: message})
+
+	ctx, span := telemetry.Tracer.Start(ctx, op, trace.WithSpanKind(trace.SpanKindConsumer))
 	defer span.End()
 
 	var command model.CommandEnvelope[json.RawMessage]
@@ -322,7 +337,9 @@ func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
 func (w *Worker) HandleEventMessage(message *sarama.ConsumerMessage) {
 	const op = "Worker.HandleEventMessage"
 
-	ctx, span := telemetry.Tracer.Start(context.Background(), op)
+	ctx := otel.GetTextMapPropagator().Extract(context.Background(), telemetry.ConsumerCarrier{Message: message})
+
+	ctx, span := telemetry.Tracer.Start(ctx, op, trace.WithSpanKind(trace.SpanKindConsumer))
 	defer span.End()
 
 	var event model.EventEnvelope[json.RawMessage]

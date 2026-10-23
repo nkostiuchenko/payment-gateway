@@ -21,3 +21,8 @@ const (
 	EventProcessingFailed    = "ProcessingFailed"
 	EventProcessingSucceeded = "ProcessingSucceeded"
 )
+
+const (
+	CommandsConsumerGroup = "commands-consumer-group"
+	EventsConsumerGroup   = "events-consumer-group"
+)
