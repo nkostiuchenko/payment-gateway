@@ -123,7 +123,7 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.Handle("POST /pay", middleware.RequestID(middleware.RequestLogger(slog.Default())(http.HandlerFunc(handlePay))))
 
-	httpServer := http.Server{Addr: ":8080", Handler: mux}
+	httpServer := http.Server{Addr: ":8081", Handler: mux}
 
 	serverErr := make(chan error, 1)
 
