@@ -170,7 +170,7 @@ func run() error {
 		return fmt.Errorf("failed load config: %w", err)
 	}
 
-	shutdownTracing, err := telemetry.InitTracing(context.Background())
+	shutdownTracing, err := telemetry.InitTracing(context.Background(), cfg)
 	if err != nil {
 		return fmt.Errorf("otel setup failed: %w", err)
 	}

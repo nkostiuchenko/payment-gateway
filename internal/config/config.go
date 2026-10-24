@@ -7,6 +7,7 @@ import (
 
 type Config struct {
 	AppEnv      string `env:"APP_ENV" envDefault:"development"`
+	AppName     string `env:"APP_NAME,required"`
 	DatabaseURL string `env:"DATABASE_URL,required"`
 	Debug       bool   `env:"DEBUG" envDefault:"false"`
 	KafkaURL    string `env:"KAFKA_URL,required"`

@@ -7,6 +7,8 @@ services:
         APP: api
     env_file:
       - .env
+    environment:
+      APP_NAME: payment-service
     ports:
       - "8080:8080"
     restart: unless-stopped
@@ -22,6 +24,8 @@ services:
         APP: worker
     env_file:
       - .env
+    environment:
+      APP_NAME: worker-service
     restart: unless-stopped
     depends_on:
       postgres:

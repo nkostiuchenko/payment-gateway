@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/nkostiuchenko/payment-gateway/internal/config"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -13,11 +14,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-const (
-	appName = "payment-service"
-)
-
-func InitTracing(ctx context.Context) (func(context.Context) error, error) {
+func InitTracing(ctx context.Context, cfg config.Config) (func(context.Context) error, error) {
 	const op = "InitTracing"
 
 	exporter, err := otlptracehttp.New(ctx)
@@ -28,8 +25,8 @@ func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 	res, err := sdkresource.Merge(
 		sdkresource.Default(),
 		sdkresource.NewSchemaless(
-			attribute.String("service.name", appName),
-			attribute.String("deployment.environment.name", "development"),
+			attribute.String("service.name", cfg.AppName),
+			attribute.String("deployment.environment.name", cfg.AppEnv),
 		),
 	)
 
