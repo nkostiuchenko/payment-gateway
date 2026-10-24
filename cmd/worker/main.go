@@ -153,12 +153,17 @@ func Handle_CommandCreatePayment(ctx context.Context, w *Worker, command model.C
 		return
 	}
 
-	w.commandRepository.Save(ctx, &model.Command{
+	logger := w.logger.With("payment_id", payment.ID, "command_type", command.CommandType)
+
+	if err := w.commandRepository.Save(ctx, &model.Command{
 		ID:          uuid.NewString(),
 		CommandType: common.CommandCreatePayment,
 		Payload:     payment,
 		CreatedAt:   time.Now(),
-	})
+	}); err != nil {
+		logger.Error("command save failed", "error", err)
+		return
+	}
 
 	PublishPaymentCreated(ctx, w.producer, payment)
 
@@ -178,17 +183,23 @@ func Handle_EventPaymentCreated(ctx context.Context, w *Worker, event model.Even
 		return
 	}
 
-	// FIXME: no exception handling
-	w.paymentRepository.Save(ctx, &payment)
+	logger := w.logger.With("payment_id", payment.ID, "event_type", event.EventType)
 
-	// FIXME: no exception handling
-	w.eventRepository.Save(ctx, &model.Event{
+	if err := w.eventRepository.Save(ctx, &model.Event{
 		ID:        uuid.NewString(),
 		EventType: event.EventType,
 		PaymentID: payment.ID,
 		Payload:   event.Payload,
 		CreatedAt: time.Now(),
-	})
+	}); err != nil {
+		logger.Error("event save failed", "error", err)
+		return
+	}
+
+	if err := w.paymentRepository.Save(ctx, &payment); err != nil {
+		logger.Error("payment save failed", "error", err)
+		return
+	}
 }
 
 func Handle_EventPaymentProcessingStarted(ctx context.Context, w *Worker, event model.EventEnvelope[json.RawMessage]) {
@@ -204,23 +215,32 @@ func Handle_EventPaymentProcessingStarted(ctx context.Context, w *Worker, event 
 		return
 	}
 
+	logger := w.logger.With("payment_id", payload.PaymentID, "event_type", event.EventType)
+
 	payment, err := w.paymentRepository.GetByID(ctx, payload.PaymentID)
 	if err != nil {
-		w.logger.Error("payment not found", "error", err)
+		logger.Error("payment not found", "error", err)
 		return
 	}
 
 	payment.Status = common.StatusProcessing
 
-	w.paymentRepository.Save(ctx, payment)
-
-	w.eventRepository.Save(ctx, &model.Event{
+	if err := w.eventRepository.Save(ctx, &model.Event{
 		ID:        uuid.NewString(),
 		EventType: event.EventType,
 		PaymentID: payment.ID,
 		Payload:   event.Payload,
 		CreatedAt: time.Now(),
-	})
+	}); err != nil {
+		logger.Error("event save failed", "error", err)
+		return
+	}
+
+	if err := w.paymentRepository.Save(ctx, payment); err != nil {
+		logger.Error("payment save failed", "error", err)
+		return
+	}
+
 }
 
 func Handle_EventProcessingFailed(ctx context.Context, w *Worker, event model.EventEnvelope[json.RawMessage]) {
@@ -236,23 +256,31 @@ func Handle_EventProcessingFailed(ctx context.Context, w *Worker, event model.Ev
 		return
 	}
 
+	logger := w.logger.With("payment_id", payload.PaymentID, "event_type", event.EventType)
+
 	payment, err := w.paymentRepository.GetByID(ctx, payload.PaymentID)
 	if err != nil {
-		w.logger.Error("payment not found", "error", err)
+		logger.Error("payment not found", "error", err)
 		return
 	}
 
 	payment.Status = common.StatusFailed
 
-	w.paymentRepository.Save(ctx, payment)
-
-	w.eventRepository.Save(ctx, &model.Event{
+	if err := w.eventRepository.Save(ctx, &model.Event{
 		ID:        uuid.NewString(),
 		EventType: event.EventType,
 		PaymentID: payment.ID,
 		Payload:   event.Payload,
 		CreatedAt: time.Now(),
-	})
+	}); err != nil {
+		logger.Error("event save failed", "error", err)
+		return
+	}
+
+	if err := w.paymentRepository.Save(ctx, payment); err != nil {
+		logger.Error("payment save failed", "error", err)
+		return
+	}
 }
 
 func Handle_EventProcessingSucceeded(ctx context.Context, w *Worker, event model.EventEnvelope[json.RawMessage]) {
@@ -268,23 +296,31 @@ func Handle_EventProcessingSucceeded(ctx context.Context, w *Worker, event model
 		return
 	}
 
+	logger := w.logger.With("payment_id", payload.PaymentID, "event_type", event.EventType)
+
 	payment, err := w.paymentRepository.GetByID(ctx, payload.PaymentID)
 	if err != nil {
-		w.logger.Error("payment not found", "error", err)
+		logger.Error("payment not found", "error", err)
 		return
 	}
 
 	payment.Status = common.StatusCompleted
 
-	w.paymentRepository.Save(ctx, payment)
-
-	w.eventRepository.Save(ctx, &model.Event{
+	if err := w.eventRepository.Save(ctx, &model.Event{
 		ID:        uuid.NewString(),
 		EventType: event.EventType,
 		PaymentID: payment.ID,
 		Payload:   event.Payload,
 		CreatedAt: time.Now(),
-	})
+	}); err != nil {
+		logger.Error("event save failed", "error", err)
+		return
+	}
+
+	if err := w.paymentRepository.Save(ctx, payment); err != nil {
+		logger.Error("payment save failed", "error", err)
+		return
+	}
 }
 
 type Worker struct {
