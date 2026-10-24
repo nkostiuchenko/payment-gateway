@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/XSAM/otelsql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/nkostiuchenko/payment-gateway/internal/broker"
 	"github.com/nkostiuchenko/payment-gateway/internal/config"
+	"github.com/nkostiuchenko/payment-gateway/internal/db"
 	"github.com/nkostiuchenko/payment-gateway/internal/dto"
 	"github.com/nkostiuchenko/payment-gateway/internal/logging"
 	"github.com/nkostiuchenko/payment-gateway/internal/metrics"
@@ -175,7 +175,7 @@ func run() error {
 		return fmt.Errorf("otel setup failed: %w", err)
 	}
 
-	db, err := otelsql.Open("pgx", cfg.DatabaseURL)
+	db, err := db.NewPostgres(cfg.DatabaseURL)
 	if err != nil {
 		return fmt.Errorf("db connection failed: %w", err)
 	}

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
-	"github.com/XSAM/otelsql"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.opentelemetry.io/otel"
@@ -22,6 +21,7 @@ import (
 	"github.com/nkostiuchenko/payment-gateway/internal/broker"
 	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/config"
+	"github.com/nkostiuchenko/payment-gateway/internal/db"
 	"github.com/nkostiuchenko/payment-gateway/internal/logging"
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
 	"github.com/nkostiuchenko/payment-gateway/internal/provider"
@@ -370,7 +370,7 @@ func run() error {
 		return fmt.Errorf("otel setup failed: %w", err)
 	}
 
-	db, err := otelsql.Open("pgx", cfg.DatabaseURL)
+	db, err := db.NewPostgres(cfg.DatabaseURL)
 	if err != nil {
 		return fmt.Errorf("db connection failed: %w", err)
 	}
