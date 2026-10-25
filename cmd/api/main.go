@@ -37,7 +37,7 @@ import (
 type PaymentService interface {
 	GetByID(ctx context.Context, id string) (*model.Payment, error)
 	Create(ctx context.Context, input service.CreatePaymentInput) (*model.Payment, error)
-	Webhook(ctx context.Context, id string) error
+	Webhook(ctx context.Context, webhook service.WebhookInput) error
 }
 
 type Server struct {
@@ -177,7 +177,23 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	span.SetAttributes(attribute.String("payment.id", id))
 
-	s.paymentService.Webhook(ctx, id)
+	type Body struct {
+		Status string `json:"status"`
+		Intent string `json:"intent"`
+	}
+
+	var body Body
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{ "error": "malformed request body" }`))
+		return
+	}
+
+	s.paymentService.Webhook(ctx, service.WebhookInput{
+		Status:    body.Status,
+		PaymentID: id,
+		Intent:    body.Intent,
+	})
 }
 
 func run() error {

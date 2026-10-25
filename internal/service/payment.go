@@ -37,6 +37,12 @@ type CreatePaymentInput struct {
 	IdempotencyKey string
 }
 
+type WebhookInput struct {
+	PaymentID string
+	Status    string
+	Intent    string
+}
+
 func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (*model.Payment, error) {
 	const op = "PaymentService.Create"
 
@@ -112,23 +118,38 @@ func (s *PaymentService) GetByID(ctx context.Context, id string) (*model.Payment
 	return payment, nil
 }
 
-func (s *PaymentService) Webhook(ctx context.Context, id string) error {
+func (s *PaymentService) Webhook(ctx context.Context, input WebhookInput) error {
 	const op = "PaymentService.Webhook"
 
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
-	if _, err := uuid.Parse(id); err != nil {
+	if _, err := uuid.Parse(input.PaymentID); err != nil {
 		err = fmt.Errorf("%s: %w", op, ErrInvalidId)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 
-	event := model.EventEnvelope[model.PaymentProcessingSucceeded]{
-		EventType:     common.EventProcessingSucceeded,
-		SchemaVersion: 1,
-		Payload:       model.PaymentProcessingSucceeded{PaymentID: id},
+	var event any
+	switch input.Status {
+	case common.WebhookStatusSuccess:
+		event = model.EventEnvelope[model.PaymentProcessingSucceeded]{
+			EventType:     common.EventProcessingSucceeded,
+			SchemaVersion: 1,
+			Payload:       model.PaymentProcessingSucceeded{PaymentID: input.PaymentID},
+		}
+	case common.WebhookStatusError:
+		event = model.EventEnvelope[model.PaymentProcessingFailed]{
+			EventType:     common.EventProcessingFailed,
+			SchemaVersion: 1,
+			Payload:       model.PaymentProcessingFailed{PaymentID: input.PaymentID},
+		}
+	default:
+		err := fmt.Errorf("%s: unknown status %q: %w", op, input.Status, ErrUnknownStatus)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
 
 	js, err := json.Marshal(event)

@@ -27,3 +27,8 @@ const (
 	CommandsConsumerGroup = "commands-consumer-group"
 	EventsConsumerGroup   = "events-consumer-group"
 )
+
+const (
+	WebhookStatusSuccess = "success"
+	WebhookStatusError   = "error"
+)
