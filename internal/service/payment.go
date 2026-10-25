@@ -17,6 +17,7 @@ import (
 type PaymentRepository interface {
 	Save(ctx context.Context, payment *model.Payment) error
 	GetByID(ctx context.Context, id string) (*model.Payment, error)
+	GetByIdempotencyKey(ctx context.Context, key string) (*model.Payment, error)
 }
 
 type Broker interface {
@@ -29,10 +30,11 @@ type PaymentService struct {
 }
 
 type CreatePaymentInput struct {
-	Amount   int
-	Currency string
-	Provider string
-	Metadata *json.RawMessage
+	Amount         int
+	Currency       string
+	Provider       string
+	Metadata       *json.RawMessage
+	IdempotencyKey string
 }
 
 func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (*model.Payment, error) {
@@ -49,21 +51,27 @@ func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (
 		return nil, fmt.Errorf("%s: provider required: %w", op, ErrInvalidPayment)
 	}
 
-	payment := model.Payment{
-		ID:        uuid.NewString(),
-		Amount:    input.Amount,
-		Currency:  input.Currency,
-		Provider:  input.Provider,
-		Status:    "NEW",
-		Metadata:  input.Metadata,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	payment, err := s.repo.GetByIdempotencyKey(ctx, input.IdempotencyKey)
+	if err == nil {
+		return payment, nil
+	}
+
+	payment = &model.Payment{
+		ID:             uuid.NewString(),
+		Amount:         input.Amount,
+		Currency:       input.Currency,
+		Provider:       input.Provider,
+		Status:         "NEW",
+		Metadata:       input.Metadata,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		IdempotencyKey: input.IdempotencyKey,
 	}
 
 	command := model.CommandEnvelope[model.Payment]{
 		CommandType:   "CreatePayment",
 		SchemaVersion: 1,
-		Payload:       payment,
+		Payload:       *payment,
 	}
 
 	js, err := json.Marshal(command)
@@ -79,7 +87,7 @@ func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (
 		return nil, fmt.Errorf("%s: publish create payment: %w", op, err)
 	}
 
-	return &payment, nil
+	return payment, nil
 }
 
 func (s *PaymentService) GetByID(ctx context.Context, id string) (*model.Payment, error) {

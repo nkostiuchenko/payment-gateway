@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -126,11 +127,24 @@ func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	idempotencyKey := r.Header.Get("Idempotency-Key")
+	if idempotencyKey != "" {
+		if _, err := uuid.Parse(idempotencyKey); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			err := fmt.Errorf("Idempotency-Key must be UUID")
+			json.NewEncoder(w).Encode(dto.ErrorResponse{Error: err.Error()})
+			return
+		}
+	} else {
+		idempotencyKey = uuid.NewString()
+	}
+
 	payment, err := s.paymentService.Create(ctx, service.CreatePaymentInput{
-		Amount:   *request.Amount,
-		Provider: *request.Provider,
-		Currency: *request.Currency,
-		Metadata: request.Metadata,
+		Amount:         *request.Amount,
+		Provider:       *request.Provider,
+		Currency:       *request.Currency,
+		Metadata:       request.Metadata,
+		IdempotencyKey: idempotencyKey,
 	})
 
 	if errors.Is(err, service.ErrInvalidPayment) {
@@ -145,8 +159,12 @@ func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	type Response struct {
+		PaymentID string `json:"payment_id"`
+	}
+
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(payment)
+	json.NewEncoder(w).Encode(Response{PaymentID: payment.ID})
 }
 
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
