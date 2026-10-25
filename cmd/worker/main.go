@@ -167,7 +167,9 @@ func Handle_CommandCreatePayment(ctx context.Context, w *Worker, command model.C
 
 	PublishPaymentCreated(ctx, w.producer, payment)
 
-	w.ProcessPayment(ctx, w.producer, payment)
+	w.wg.Go(func() {
+		w.ProcessPayment(ctx, w.producer, payment)
+	})
 }
 
 func Handle_EventPaymentCreated(ctx context.Context, w *Worker, event model.EventEnvelope[json.RawMessage]) {
@@ -463,13 +465,9 @@ loop:
 		case <-sig:
 			break loop
 		case message := <-commandConsumer.Messages():
-			worker.wg.Go(func() {
-				worker.HandleCommandMessage(message)
-			})
+			worker.HandleCommandMessage(message)
 		case message := <-eventConsumer.Messages():
-			worker.wg.Go(func() {
-				worker.HandleEventMessage(message)
-			})
+			worker.HandleEventMessage(message)
 		}
 	}
 
