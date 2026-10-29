@@ -169,6 +169,17 @@ services:
     depends_on:
       - kafka
 
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+    volumes:
+      - mongo_data:/data/db
+
 volumes:
   pgdata:
   esdata:
@@ -176,3 +187,4 @@ volumes:
   prometheus-data:
   grafana_data:
   kafka-data:
+  mongo_data:
