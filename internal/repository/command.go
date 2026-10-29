@@ -2,14 +2,16 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type CommandRepository struct {
-	db *sql.DB
+	collection *mongo.Collection
 }
 
 func (r *CommandRepository) Save(ctx context.Context, command *model.Command) error {
@@ -18,32 +20,20 @@ func (r *CommandRepository) Save(ctx context.Context, command *model.Command) er
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
-	const query = `
-	INSERT INTO processed_commands (id, command_type, payload, created_at)
-	VALUES ($1, $2, $3, $4)
-	ON CONFLICT (id) DO UPDATE 
-	SET
-		command_type = EXCLUDED.command_type,
-		payload = EXCLUDED.payload,
-		created_at = EXCLUDED.created_at;
-	`
-
-	_, err := r.db.ExecContext(
+	_, err := r.collection.UpdateOne(
 		ctx,
-		query,
-		command.ID,
-		command.CommandType,
-		command.Payload,
-		command.CreatedAt,
+		bson.M{"id": command.ID},
+		bson.M{"$set": command},
+		options.UpdateOne().SetUpsert(true),
 	)
 
 	if err != nil {
-		return fmt.Errorf("%s: insert command: %w", op, err)
+		return fmt.Errorf("%s: save command: %w", op, err)
 	}
 
 	return nil
 }
 
-func NewCommandRepository(db *sql.DB) *CommandRepository {
-	return &CommandRepository{db: db}
+func NewCommandRepository(collection *mongo.Collection) *CommandRepository {
+	return &CommandRepository{collection: collection}
 }
