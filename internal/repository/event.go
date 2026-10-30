@@ -2,16 +2,14 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type EventRepository struct {
-	collection *mongo.Collection
+	db *sql.DB
 }
 
 func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
@@ -20,20 +18,34 @@ func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
-	_, err := r.collection.UpdateOne(
+	const query = `
+	INSERT INTO payment_events (id, event_type, payment_id, payload, created_at)
+	VALUES ($1, $2, $3, $4, $5)
+	ON CONFLICT (id) DO UPDATE 
+	SET
+		event_type = EXCLUDED.event_type,
+		payment_id = EXCLUDED.payment_id,
+		payload = EXCLUDED.payload,
+		created_at = EXCLUDED.created_at;
+	`
+
+	_, err := r.db.ExecContext(
 		ctx,
-		bson.M{"id": event.ID},
-		bson.M{"$set": event},
-		options.UpdateOne().SetUpsert(true),
+		query,
+		event.ID,
+		event.EventType,
+		event.PaymentID,
+		event.Payload,
+		event.CreatedAt,
 	)
 
 	if err != nil {
-		return fmt.Errorf("%s: save event: %w", op, err)
+		return fmt.Errorf("%s: insert event: %w", op, err)
 	}
 
 	return nil
 }
 
-func NewEventRepository(collection *mongo.Collection) *EventRepository {
-	return &EventRepository{collection: collection}
+func NewEventRepository(db *sql.DB) *EventRepository {
+	return &EventRepository{db: db}
 }

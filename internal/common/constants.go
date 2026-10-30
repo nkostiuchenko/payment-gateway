@@ -32,8 +32,3 @@ const (
 	WebhookStatusSuccess = "success"
 	WebhookStatusError   = "error"
 )
-
-const (
-	MongoEventsCollection   = "events"
-	MongoCommandsCollection = "commands"
-)
