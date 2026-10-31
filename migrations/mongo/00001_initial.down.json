@@ -1,0 +1,6 @@
+[
+  {
+    "dropIndexes": "payments",
+    "index": ["payments_id_unique", "payments_idempotency_key_unique"]
+  }
+]

@@ -1,0 +1,21 @@
+[
+  {
+    "createIndexes": "payments",
+    "indexes": [
+      {
+        "key": {
+          "id": 1
+        },
+        "name": "payments_id_unique",
+        "unique": true
+      },
+      {
+        "key": {
+          "idempotencykey": 1
+        },
+        "name": "payments_idempotencykey_unique",
+        "unique": true
+      }
+    ]
+  }
+]
