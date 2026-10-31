@@ -1,5 +1,3 @@
--- +goose Up
--- +goose StatementBegin
 CREATE TABLE payment_events (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_type  TEXT NOT NULL,
@@ -14,10 +12,3 @@ CREATE TABLE processed_commands (
     payload         JSONB NOT NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
--- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE payment_events;
-DROP TABLE processed_commands;
--- +goose StatementEnd
