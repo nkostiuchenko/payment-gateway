@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
 )
 
@@ -18,7 +19,14 @@ func (r *CommandRepository) Save(ctx context.Context, command *model.Command) er
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
-	const query = `
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("%s: begin transaction: %w", op, err)
+	}
+
+	defer tx.Rollback()
+
+	const commandQuery = `
 	INSERT INTO processed_commands (id, command_type, payload, created_at)
 	VALUES ($1, $2, $3, $4)
 	ON CONFLICT (id) DO UPDATE 
@@ -28,9 +36,9 @@ func (r *CommandRepository) Save(ctx context.Context, command *model.Command) er
 		created_at = EXCLUDED.created_at;
 	`
 
-	_, err := r.db.ExecContext(
+	_, err = tx.ExecContext(
 		ctx,
-		query,
+		commandQuery,
 		command.ID,
 		command.CommandType,
 		command.Payload,
@@ -39,6 +47,27 @@ func (r *CommandRepository) Save(ctx context.Context, command *model.Command) er
 
 	if err != nil {
 		return fmt.Errorf("%s: insert command: %w", op, err)
+	}
+
+	const outboxQuery = `
+	INSERT INTO outbox (id, topic, message)
+	VALUES ($1, $2, $3)
+	`
+
+	_, err = tx.ExecContext(
+		ctx,
+		outboxQuery,
+		command.ID,
+		common.CommandsTopic,
+		command.Payload,
+	)
+
+	if err != nil {
+		return fmt.Errorf("%s: insert outbox: %w", op, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("%s: commit: %w", op, err)
 	}
 
 	return nil

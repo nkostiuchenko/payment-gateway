@@ -39,16 +39,24 @@ var (
 
 var tracer = otel.Tracer("github.com/nkostiuchenko/payment-gateway/cmd/worker")
 
-func PublishProcessingStarted(ctx context.Context, producer sarama.SyncProducer, paymentID string) error {
+func PublishProcessingStarted(ctx context.Context, w *Worker, paymentID string) error {
 	const op = "PublishProcessingStarted"
 
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
-	err := broker.Publish(ctx, common.EventsTopic, producer, model.EventEnvelope[model.PaymentProcessingStarted]{
+	event := model.EventEnvelope[model.PaymentProcessingStarted]{
 		EventType:     common.EventProcessingStarted,
 		SchemaVersion: 1,
 		Payload:       model.PaymentProcessingStarted{PaymentID: paymentID},
+	}
+
+	err := w.eventRepository.Save(ctx, &model.Event{
+		ID:        uuid.NewString(),
+		EventType: common.EventProcessingStarted,
+		PaymentID: paymentID,
+		Payload:   event,
+		CreatedAt: time.Now(),
 	})
 
 	if err != nil {
@@ -58,16 +66,24 @@ func PublishProcessingStarted(ctx context.Context, producer sarama.SyncProducer,
 	return nil
 }
 
-func PublishProcessingFailed(ctx context.Context, producer sarama.SyncProducer, paymentID string) error {
+func PublishProcessingFailed(ctx context.Context, w *Worker, paymentID string) error {
 	const op = "PublishProcessingFailed"
 
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
-	err := broker.Publish(ctx, common.EventsTopic, producer, model.EventEnvelope[model.PaymentProcessingStarted]{
+	event := model.EventEnvelope[model.PaymentProcessingStarted]{
 		EventType:     common.EventProcessingFailed,
 		SchemaVersion: 1,
 		Payload:       model.PaymentProcessingStarted{PaymentID: paymentID},
+	}
+
+	err := w.eventRepository.Save(ctx, &model.Event{
+		ID:        uuid.NewString(),
+		EventType: common.EventProcessingFailed,
+		PaymentID: paymentID,
+		Payload:   event,
+		CreatedAt: time.Now(),
 	})
 
 	if err != nil {
@@ -77,16 +93,24 @@ func PublishProcessingFailed(ctx context.Context, producer sarama.SyncProducer, 
 	return nil
 }
 
-func PublishProcessingSucceeded(ctx context.Context, producer sarama.SyncProducer, paymentID string) error {
+func PublishProcessingSucceeded(ctx context.Context, w *Worker, paymentID string) error {
 	const op = "PublishProcessingSucceeded"
 
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
-	err := broker.Publish(ctx, common.EventsTopic, producer, model.EventEnvelope[model.PaymentProcessingSucceeded]{
+	event := model.EventEnvelope[model.PaymentProcessingSucceeded]{
 		EventType:     common.EventProcessingSucceeded,
 		SchemaVersion: 1,
 		Payload:       model.PaymentProcessingSucceeded{PaymentID: paymentID},
+	}
+
+	err := w.eventRepository.Save(ctx, &model.Event{
+		ID:        uuid.NewString(),
+		EventType: common.EventProcessingSucceeded,
+		PaymentID: paymentID,
+		Payload:   event,
+		CreatedAt: time.Now(),
 	})
 
 	if err != nil {
@@ -96,16 +120,24 @@ func PublishProcessingSucceeded(ctx context.Context, producer sarama.SyncProduce
 	return nil
 }
 
-func PublishPaymentCreated(ctx context.Context, producer sarama.SyncProducer, payment model.Payment) error {
+func PublishPaymentCreated(ctx context.Context, w *Worker, payment model.Payment) error {
 	const op = "PublishPaymentCreated"
 
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
-	err := broker.Publish(ctx, common.EventsTopic, producer, model.EventEnvelope[model.Payment]{
+	event := model.EventEnvelope[model.Payment]{
 		EventType:     common.EventPaymentCreated,
 		SchemaVersion: 1,
 		Payload:       payment,
+	}
+
+	err := w.eventRepository.Save(ctx, &model.Event{
+		ID:        uuid.NewString(),
+		EventType: common.EventPaymentCreated,
+		PaymentID: payment.ID,
+		Payload:   event,
+		CreatedAt: time.Now(),
 	})
 
 	if err != nil {
@@ -121,11 +153,11 @@ func (w *Worker) ProcessPayment(ctx context.Context, producer sarama.SyncProduce
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
-	PublishProcessingStarted(ctx, producer, payment.ID)
+	PublishProcessingStarted(ctx, w, payment.ID)
 
 	provider, ok := w.paymentProviders[payment.Provider]
 	if !ok {
-		PublishProcessingFailed(ctx, producer, payment.ID)
+		PublishProcessingFailed(ctx, w, payment.ID)
 		return fmt.Errorf("%s: %w", op, ErrUnknownPaymentProvider)
 	}
 
@@ -133,7 +165,7 @@ func (w *Worker) ProcessPayment(ctx context.Context, producer sarama.SyncProduce
 
 	err := provider.Pay(ctx, payment.Amount, payment.Currency, webhook)
 	if err != nil {
-		PublishProcessingFailed(ctx, producer, payment.ID)
+		PublishProcessingFailed(ctx, w, payment.ID)
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
@@ -153,19 +185,7 @@ func Handle_CommandCreatePayment(ctx context.Context, w *Worker, command model.C
 		return
 	}
 
-	logger := w.logger.With("payment_id", payment.ID, "command_type", command.CommandType)
-
-	if err := w.commandRepository.Save(ctx, &model.Command{
-		ID:          uuid.NewString(),
-		CommandType: common.CommandCreatePayment,
-		Payload:     payment,
-		CreatedAt:   time.Now(),
-	}); err != nil {
-		logger.Error("command save failed", "error", err)
-		return
-	}
-
-	PublishPaymentCreated(ctx, w.producer, payment)
+	PublishPaymentCreated(ctx, w, payment)
 
 	w.wg.Go(func() {
 		w.ProcessPayment(ctx, w.producer, payment)
@@ -186,17 +206,6 @@ func Handle_EventPaymentCreated(ctx context.Context, w *Worker, event model.Even
 	}
 
 	logger := w.logger.With("payment_id", payment.ID, "event_type", event.EventType)
-
-	if err := w.eventRepository.Save(ctx, &model.Event{
-		ID:        uuid.NewString(),
-		EventType: event.EventType,
-		PaymentID: payment.ID,
-		Payload:   event.Payload,
-		CreatedAt: time.Now(),
-	}); err != nil {
-		logger.Error("event save failed", "error", err)
-		return
-	}
 
 	if err := w.paymentRepository.Save(ctx, &payment); err != nil {
 		logger.Error("payment save failed", "error", err)
@@ -227,22 +236,10 @@ func Handle_EventPaymentProcessingStarted(ctx context.Context, w *Worker, event 
 
 	payment.Status = common.StatusProcessing
 
-	if err := w.eventRepository.Save(ctx, &model.Event{
-		ID:        uuid.NewString(),
-		EventType: event.EventType,
-		PaymentID: payment.ID,
-		Payload:   event.Payload,
-		CreatedAt: time.Now(),
-	}); err != nil {
-		logger.Error("event save failed", "error", err)
-		return
-	}
-
 	if err := w.paymentRepository.Save(ctx, payment); err != nil {
 		logger.Error("payment save failed", "error", err)
 		return
 	}
-
 }
 
 func Handle_EventProcessingFailed(ctx context.Context, w *Worker, event model.EventEnvelope[json.RawMessage]) {
@@ -267,17 +264,6 @@ func Handle_EventProcessingFailed(ctx context.Context, w *Worker, event model.Ev
 	}
 
 	payment.Status = common.StatusFailed
-
-	if err := w.eventRepository.Save(ctx, &model.Event{
-		ID:        uuid.NewString(),
-		EventType: event.EventType,
-		PaymentID: payment.ID,
-		Payload:   event.Payload,
-		CreatedAt: time.Now(),
-	}); err != nil {
-		logger.Error("event save failed", "error", err)
-		return
-	}
 
 	if err := w.paymentRepository.Save(ctx, payment); err != nil {
 		logger.Error("payment save failed", "error", err)
@@ -307,17 +293,6 @@ func Handle_EventProcessingSucceeded(ctx context.Context, w *Worker, event model
 	}
 
 	payment.Status = common.StatusCompleted
-
-	if err := w.eventRepository.Save(ctx, &model.Event{
-		ID:        uuid.NewString(),
-		EventType: event.EventType,
-		PaymentID: payment.ID,
-		Payload:   event.Payload,
-		CreatedAt: time.Now(),
-	}); err != nil {
-		logger.Error("event save failed", "error", err)
-		return
-	}
 
 	if err := w.paymentRepository.Save(ctx, payment); err != nil {
 		logger.Error("payment save failed", "error", err)

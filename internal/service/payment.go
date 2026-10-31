@@ -20,13 +20,18 @@ type PaymentRepository interface {
 	GetByIdempotencyKey(ctx context.Context, key string) (*model.Payment, error)
 }
 
-type Broker interface {
-	Publish(ctx context.Context, topic string, content []byte) error
+type CommandRepository interface {
+	Save(ctx context.Context, command *model.Command) error
+}
+
+type EventRepository interface {
+	Save(ctx context.Context, event *model.Event) error
 }
 
 type PaymentService struct {
-	repo   PaymentRepository
-	broker Broker
+	paymentRepository PaymentRepository
+	eventRepository   EventRepository
+	commandRepository CommandRepository
 }
 
 type CreatePaymentInput struct {
@@ -57,7 +62,7 @@ func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (
 		return nil, fmt.Errorf("%s: provider required: %w", op, ErrInvalidPayment)
 	}
 
-	payment, err := s.repo.GetByIdempotencyKey(ctx, input.IdempotencyKey)
+	payment, err := s.paymentRepository.GetByIdempotencyKey(ctx, input.IdempotencyKey)
 	if err == nil {
 		return payment, nil
 	}
@@ -80,17 +85,17 @@ func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (
 		Payload:       *payment,
 	}
 
-	js, err := json.Marshal(command)
+	err = s.commandRepository.Save(ctx, &model.Command{
+		ID:          uuid.NewString(),
+		CommandType: common.CommandCreatePayment,
+		Payload:     command,
+		CreatedAt:   time.Now(),
+	})
+
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return nil, fmt.Errorf("%s: marshaling of command: %w", op, err)
-	}
-
-	if err := s.broker.Publish(ctx, common.CommandsTopic, js); err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return nil, fmt.Errorf("%s: publish create payment: %w", op, err)
+		return nil, fmt.Errorf("%s: command creation: %w", op, err)
 	}
 
 	return payment, nil
@@ -108,7 +113,7 @@ func (s *PaymentService) GetByID(ctx context.Context, id string) (*model.Payment
 		return nil, fmt.Errorf("%s: %w", op, ErrInvalidId)
 	}
 
-	payment, err := s.repo.GetByID(ctx, id)
+	payment, err := s.paymentRepository.GetByID(ctx, id)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -132,14 +137,17 @@ func (s *PaymentService) Webhook(ctx context.Context, input WebhookInput) error 
 	}
 
 	var event any
+	var eventType string
 	switch input.Status {
 	case common.WebhookStatusSuccess:
+		eventType = common.EventProcessingSucceeded
 		event = model.EventEnvelope[model.PaymentProcessingSucceeded]{
 			EventType:     common.EventProcessingSucceeded,
 			SchemaVersion: 1,
 			Payload:       model.PaymentProcessingSucceeded{PaymentID: input.PaymentID},
 		}
 	case common.WebhookStatusError:
+		eventType = common.EventProcessingFailed
 		event = model.EventEnvelope[model.PaymentProcessingFailed]{
 			EventType:     common.EventProcessingFailed,
 			SchemaVersion: 1,
@@ -152,24 +160,31 @@ func (s *PaymentService) Webhook(ctx context.Context, input WebhookInput) error 
 		return err
 	}
 
-	js, err := json.Marshal(event)
-	if err != nil {
-		err = fmt.Errorf("%s: marshaling of event: %w", op, err)
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return err
-	}
+	err := s.eventRepository.Save(ctx, &model.Event{
+		ID:        uuid.NewString(),
+		EventType: eventType,
+		PaymentID: input.PaymentID,
+		Payload:   &event,
+		CreatedAt: time.Now(),
+	})
 
-	if err := s.broker.Publish(ctx, common.EventsTopic, js); err != nil {
-		err = fmt.Errorf("%s: publish event failed: %w", op, err)
+	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return err
+		return fmt.Errorf("%s: event creation: %w", op, err)
 	}
 
 	return nil
 }
 
-func NewPaymentService(repo PaymentRepository, broker Broker) PaymentService {
-	return PaymentService{repo: repo, broker: broker}
+func NewPaymentService(
+	paymentRepository PaymentRepository,
+	eventRepository EventRepository,
+	commandRepository CommandRepository,
+) PaymentService {
+	return PaymentService{
+		paymentRepository: paymentRepository,
+		eventRepository:   eventRepository,
+		commandRepository: commandRepository,
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
 )
 
@@ -18,7 +19,14 @@ func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
-	const query = `
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("%s: begin transaction: %w", op, err)
+	}
+
+	defer tx.Rollback()
+
+	const eventQuery = `
 	INSERT INTO payment_events (id, event_type, payment_id, payload, created_at)
 	VALUES ($1, $2, $3, $4, $5)
 	ON CONFLICT (id) DO UPDATE 
@@ -29,9 +37,9 @@ func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 		created_at = EXCLUDED.created_at;
 	`
 
-	_, err := r.db.ExecContext(
+	_, err = tx.ExecContext(
 		ctx,
-		query,
+		eventQuery,
 		event.ID,
 		event.EventType,
 		event.PaymentID,
@@ -41,6 +49,27 @@ func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 
 	if err != nil {
 		return fmt.Errorf("%s: insert event: %w", op, err)
+	}
+
+	const outboxQuery = `
+	INSERT INTO outbox (id, topic, message)
+	VALUES ($1, $2, $3)
+	`
+
+	_, err = tx.ExecContext(
+		ctx,
+		outboxQuery,
+		event.ID,
+		common.EventsTopic,
+		event.Payload,
+	)
+
+	if err != nil {
+		return fmt.Errorf("%s: insert outbox: %w", op, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("%s: commit: %w", op, err)
 	}
 
 	return nil

@@ -21,7 +21,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/nkostiuchenko/payment-gateway/internal/broker"
 	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/config"
 	"github.com/nkostiuchenko/payment-gateway/internal/db"
@@ -219,11 +218,6 @@ func run() error {
 		return fmt.Errorf("postgres ping failed: %w", err)
 	}
 
-	broker, err := broker.NewKafkaBroker(cfg.KafkaURL)
-	if err != nil {
-		return fmt.Errorf("broker creation failed: %w", err)
-	}
-
 	mongoDB, err := db.NewMongo(cfg.MongoUsername, cfg.MongoPassword, cfg.MongoDB)
 	if err != nil {
 		return fmt.Errorf("mongo connection failed")
@@ -236,7 +230,14 @@ func run() error {
 	paymentsCollection := mongoDB.Collection(common.MongoPaymentsCollection)
 
 	paymentRepository := repository.NewPaymentRepository(paymentsCollection)
-	paymentService := service.NewPaymentService(paymentRepository, broker)
+	eventRepository := repository.NewEventRepository(pgDB)
+	commandRepository := repository.NewCommandRepository(pgDB)
+
+	paymentService := service.NewPaymentService(
+		paymentRepository,
+		eventRepository,
+		commandRepository,
+	)
 
 	server, err := NewServer(logger, &paymentService)
 	if err != nil {
