@@ -408,18 +408,29 @@ func run() error {
 		return fmt.Errorf("otel setup failed: %w", err)
 	}
 
-	db, err := db.NewPostgres(cfg.DatabaseURL)
+	pgDB, err := db.NewPostgres(cfg.DatabaseURL)
 	if err != nil {
-		return fmt.Errorf("db connection failed: %w", err)
+		return fmt.Errorf("postgres connection failed: %w", err)
 	}
 
-	if err := db.Ping(); err != nil {
-		return fmt.Errorf("db ping failed: %w", err)
+	if err := pgDB.Ping(); err != nil {
+		return fmt.Errorf("postgres ping failed: %w", err)
 	}
 
-	paymentRepository := repository.NewPaymentRepository(db)
-	commandRepository := repository.NewCommandRepository(db)
-	eventRepository := repository.NewEventRepository(db)
+	mongoDB, err := db.NewMongo(cfg.MongoUsername, cfg.MongoPassword, cfg.MongoDB)
+	if err != nil {
+		return fmt.Errorf("mongo connection failed")
+	}
+
+	if err := mongoDB.Client().Ping(context.Background(), nil); err != nil {
+		return fmt.Errorf("mongo ping failed: %w", err)
+	}
+
+	paymentsCollection := mongoDB.Collection(common.MongoPaymentsCollection)
+
+	paymentRepository := repository.NewPaymentRepository(paymentsCollection)
+	commandRepository := repository.NewCommandRepository(pgDB)
+	eventRepository := repository.NewEventRepository(pgDB)
 
 	paymentProviders := map[string]Provider{"stripe": provider.NewStripeProvider(cfg)}
 
@@ -494,9 +505,14 @@ loop:
 		return fmt.Errorf("producer close failed: %w", err)
 	}
 
-	logger.Info("closing db connection")
-	if err := db.Close(); err != nil {
-		return fmt.Errorf("db close failed: %w", err)
+	logger.Info("closing mongo connection")
+	if err := mongoDB.Client().Disconnect(context.Background()); err != nil {
+		return fmt.Errorf("mongo close failed: %w", err)
+	}
+
+	logger.Info("closing postgres connection")
+	if err := pgDB.Close(); err != nil {
+		return fmt.Errorf("postgres close failed: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

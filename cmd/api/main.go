@@ -22,6 +22,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nkostiuchenko/payment-gateway/internal/broker"
+	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/config"
 	"github.com/nkostiuchenko/payment-gateway/internal/db"
 	"github.com/nkostiuchenko/payment-gateway/internal/dto"
@@ -209,13 +210,13 @@ func run() error {
 		return fmt.Errorf("otel setup failed: %w", err)
 	}
 
-	db, err := db.NewPostgres(cfg.DatabaseURL)
+	pgDB, err := db.NewPostgres(cfg.DatabaseURL)
 	if err != nil {
-		return fmt.Errorf("db connection failed: %w", err)
+		return fmt.Errorf("postgres connection failed: %w", err)
 	}
 
-	if err := db.Ping(); err != nil {
-		return fmt.Errorf("db ping failed: %w", err)
+	if err := pgDB.Ping(); err != nil {
+		return fmt.Errorf("postgres ping failed: %w", err)
 	}
 
 	broker, err := broker.NewKafkaBroker(cfg.KafkaURL)
@@ -223,7 +224,18 @@ func run() error {
 		return fmt.Errorf("broker creation failed: %w", err)
 	}
 
-	paymentRepository := repository.NewPaymentRepository(db)
+	mongoDB, err := db.NewMongo(cfg.MongoUsername, cfg.MongoPassword, cfg.MongoDB)
+	if err != nil {
+		return fmt.Errorf("mongo connection failed")
+	}
+
+	if err := mongoDB.Client().Ping(context.Background(), nil); err != nil {
+		return fmt.Errorf("mongo ping failed: %w", err)
+	}
+
+	paymentsCollection := mongoDB.Collection(common.MongoPaymentsCollection)
+
+	paymentRepository := repository.NewPaymentRepository(paymentsCollection)
 	paymentService := service.NewPaymentService(paymentRepository, broker)
 
 	server, err := NewServer(logger, &paymentService)
@@ -283,9 +295,14 @@ func run() error {
 		return fmt.Errorf("server closed with error: %w", err)
 	}
 
-	logger.Info("closing db connection")
-	if err := db.Close(); err != nil {
-		return fmt.Errorf("db close failed: %w", err)
+	logger.Info("closing mongo connection")
+	if err := mongoDB.Client().Disconnect(context.Background()); err != nil {
+		return fmt.Errorf("mongo close failed: %w", err)
+	}
+
+	logger.Info("closing postgres connection")
+	if err := pgDB.Close(); err != nil {
+		return fmt.Errorf("postgres close failed: %w", err)
 	}
 
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)

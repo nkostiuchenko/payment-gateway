@@ -32,3 +32,7 @@ const (
 	WebhookStatusSuccess = "success"
 	WebhookStatusError   = "error"
 )
+
+const (
+	MongoPaymentsCollection = "payments"
+)
