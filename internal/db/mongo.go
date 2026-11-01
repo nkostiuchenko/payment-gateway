@@ -9,15 +9,10 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-func NewMongo(user string, password string, db string) (*mongo.Database, error) {
-	client, err := mongo.Connect(
-		options.Client().SetAuth(
-			options.Credential{
-				Username: user,
-				Password: password,
-			},
-		),
-	)
+func NewMongo(host string, user string, password string, db string) (*mongo.Database, error) {
+	creds := options.Credential{Username: user, Password: password}
+
+	client, err := mongo.Connect(options.Client().SetHosts([]string{host}).SetAuth(creds))
 
 	if err != nil {
 		return nil, fmt.Errorf("db connection failed: %w", err)

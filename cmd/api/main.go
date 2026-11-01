@@ -218,9 +218,9 @@ func run() error {
 		return fmt.Errorf("postgres ping failed: %w", err)
 	}
 
-	mongoDB, err := db.NewMongo(cfg.MongoUsername, cfg.MongoPassword, cfg.MongoDB)
+	mongoDB, err := db.NewMongo(cfg.MongoURL, cfg.MongoUsername, cfg.MongoPassword, cfg.MongoDB)
 	if err != nil {
-		return fmt.Errorf("mongo connection failed")
+		return fmt.Errorf("mongo connection failed: %w", err)
 	}
 
 	if err := mongoDB.Client().Ping(context.Background(), nil); err != nil {

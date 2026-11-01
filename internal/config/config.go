@@ -13,6 +13,7 @@ type Config struct {
 	KafkaURL      string `env:"KAFKA_URL,required"`
 	StripeURL     string `env:"STRIPE_URL,required"`
 	WebhookURL    string `env:"WEBHOOK_URL,required"`
+	MongoURL      string `env:"MONGO_URL,required"`
 	MongoUsername string `env:"MONGO_USERNAME,required"`
 	MongoPassword string `env:"MONGO_PASSWORD,required"`
 	MongoDB       string `env:"MONGO_DB,required"`
