@@ -17,6 +17,7 @@ type Config struct {
 	MongoUsername string `env:"MONGO_USERNAME,required"`
 	MongoPassword string `env:"MONGO_PASSWORD,required"`
 	MongoDB       string `env:"MONGO_DB,required"`
+	OutboxDelay   int64  `env:"OUTBOX_DELAY,required"`
 }
 
 func Load() (Config, error) {

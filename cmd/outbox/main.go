@@ -134,7 +134,7 @@ func run() error {
 		return fmt.Errorf("kafka producer creation failed: %w", err)
 	}
 
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(time.Duration(cfg.OutboxDelay) * time.Millisecond)
 	defer ticker.Stop()
 
 loop:
