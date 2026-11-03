@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/nkostiuchenko/payment-gateway/internal/common"
@@ -10,7 +9,7 @@ import (
 )
 
 type EventRepository struct {
-	db *sql.DB
+	db QueryerExecer
 }
 
 func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
@@ -18,13 +17,6 @@ func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
-
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("%s: begin transaction: %w", op, err)
-	}
-
-	defer tx.Rollback()
 
 	const eventQuery = `
 	INSERT INTO payment_events (id, event_type, payment_id, payload, created_at)
@@ -37,7 +29,7 @@ func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 		created_at = EXCLUDED.created_at;
 	`
 
-	_, err = tx.ExecContext(
+	_, err := r.db.ExecContext(
 		ctx,
 		eventQuery,
 		event.ID,
@@ -56,7 +48,7 @@ func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 	VALUES ($1, $2, $3)
 	`
 
-	_, err = tx.ExecContext(
+	_, err = r.db.ExecContext(
 		ctx,
 		outboxQuery,
 		event.ID,
@@ -68,13 +60,9 @@ func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 		return fmt.Errorf("%s: insert outbox: %w", op, err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("%s: commit: %w", op, err)
-	}
-
 	return nil
 }
 
-func NewEventRepository(db *sql.DB) *EventRepository {
+func NewEventRepository(db QueryerExecer) *EventRepository {
 	return &EventRepository{db: db}
 }

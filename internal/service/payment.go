@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
+	"github.com/nkostiuchenko/payment-gateway/internal/repository"
 )
 
 type PaymentRepository interface {
@@ -28,10 +29,13 @@ type EventRepository interface {
 	Save(ctx context.Context, event *model.Event) error
 }
 
+type UnitOfWork interface {
+	WithinTx(context.Context, func(context.Context, repository.Repositories) error) error
+}
+
 type PaymentService struct {
 	paymentRepository PaymentRepository
-	eventRepository   EventRepository
-	commandRepository CommandRepository
+	uow               UnitOfWork
 }
 
 type CreatePaymentInput struct {
@@ -85,11 +89,13 @@ func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (
 		Payload:       *payment,
 	}
 
-	err = s.commandRepository.Save(ctx, &model.Command{
-		ID:          uuid.NewString(),
-		CommandType: common.CommandCreatePayment,
-		Payload:     command,
-		CreatedAt:   time.Now(),
+	err = s.uow.WithinTx(ctx, func(ctx context.Context, r repository.Repositories) error {
+		return r.Command.Save(ctx, &model.Command{
+			ID:          uuid.NewString(),
+			CommandType: common.CommandCreatePayment,
+			Payload:     command,
+			CreatedAt:   time.Now(),
+		})
 	})
 
 	if err != nil {
@@ -160,12 +166,14 @@ func (s *PaymentService) Webhook(ctx context.Context, input WebhookInput) error 
 		return err
 	}
 
-	err := s.eventRepository.Save(ctx, &model.Event{
-		ID:        uuid.NewString(),
-		EventType: eventType,
-		PaymentID: input.PaymentID,
-		Payload:   &event,
-		CreatedAt: time.Now(),
+	err := s.uow.WithinTx(ctx, func(ctx context.Context, r repository.Repositories) error {
+		return r.Event.Save(ctx, &model.Event{
+			ID:        uuid.NewString(),
+			EventType: eventType,
+			PaymentID: input.PaymentID,
+			Payload:   &event,
+			CreatedAt: time.Now(),
+		})
 	})
 
 	if err != nil {
@@ -177,14 +185,6 @@ func (s *PaymentService) Webhook(ctx context.Context, input WebhookInput) error 
 	return nil
 }
 
-func NewPaymentService(
-	paymentRepository PaymentRepository,
-	eventRepository EventRepository,
-	commandRepository CommandRepository,
-) PaymentService {
-	return PaymentService{
-		paymentRepository: paymentRepository,
-		eventRepository:   eventRepository,
-		commandRepository: commandRepository,
-	}
+func NewPaymentService(paymentRepository PaymentRepository, uow UnitOfWork) *PaymentService {
+	return &PaymentService{paymentRepository: paymentRepository, uow: uow}
 }

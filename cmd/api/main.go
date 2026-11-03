@@ -230,16 +230,12 @@ func run() error {
 	paymentsCollection := mongoDB.Collection(common.MongoPaymentsCollection)
 
 	paymentRepository := repository.NewPaymentRepository(paymentsCollection)
-	eventRepository := repository.NewEventRepository(pgDB)
-	commandRepository := repository.NewCommandRepository(pgDB)
 
-	paymentService := service.NewPaymentService(
-		paymentRepository,
-		eventRepository,
-		commandRepository,
-	)
+	uow := repository.NewUnitOfWork(pgDB, nil)
 
-	server, err := NewServer(logger, &paymentService)
+	paymentService := service.NewPaymentService(paymentRepository, uow)
+
+	server, err := NewServer(logger, paymentService)
 	if err != nil {
 		return fmt.Errorf("server creation failed: %w", err)
 	}

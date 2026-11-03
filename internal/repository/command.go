@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/nkostiuchenko/payment-gateway/internal/common"
@@ -10,7 +9,7 @@ import (
 )
 
 type CommandRepository struct {
-	db *sql.DB
+	db QueryerExecer
 }
 
 func (r *CommandRepository) Save(ctx context.Context, command *model.Command) error {
@@ -18,13 +17,6 @@ func (r *CommandRepository) Save(ctx context.Context, command *model.Command) er
 
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
-
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("%s: begin transaction: %w", op, err)
-	}
-
-	defer tx.Rollback()
 
 	const commandQuery = `
 	INSERT INTO processed_commands (id, command_type, payload, created_at)
@@ -36,7 +28,7 @@ func (r *CommandRepository) Save(ctx context.Context, command *model.Command) er
 		created_at = EXCLUDED.created_at;
 	`
 
-	_, err = tx.ExecContext(
+	_, err := r.db.ExecContext(
 		ctx,
 		commandQuery,
 		command.ID,
@@ -54,7 +46,7 @@ func (r *CommandRepository) Save(ctx context.Context, command *model.Command) er
 	VALUES ($1, $2, $3)
 	`
 
-	_, err = tx.ExecContext(
+	_, err = r.db.ExecContext(
 		ctx,
 		outboxQuery,
 		command.ID,
@@ -66,13 +58,9 @@ func (r *CommandRepository) Save(ctx context.Context, command *model.Command) er
 		return fmt.Errorf("%s: insert outbox: %w", op, err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("%s: commit: %w", op, err)
-	}
-
 	return nil
 }
 
-func NewCommandRepository(db *sql.DB) *CommandRepository {
+func NewCommandRepository(db QueryerExecer) *CommandRepository {
 	return &CommandRepository{db: db}
 }
