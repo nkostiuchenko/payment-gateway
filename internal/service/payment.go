@@ -52,26 +52,21 @@ type WebhookInput struct {
 	Intent    string
 }
 
-func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (*model.Payment, error) {
+func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (string, error) {
 	const op = "PaymentService.Create"
 
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
 	if input.Amount <= 0 {
-		return nil, fmt.Errorf("%s: amount must be positive: %w", op, ErrInvalidPayment)
+		return "", fmt.Errorf("%s: amount must be positive: %w", op, ErrInvalidPayment)
 	}
 
 	if strings.TrimSpace(input.Provider) == "" {
-		return nil, fmt.Errorf("%s: provider required: %w", op, ErrInvalidPayment)
+		return "", fmt.Errorf("%s: provider required: %w", op, ErrInvalidPayment)
 	}
 
-	payment, err := s.paymentRepository.GetByIdempotencyKey(ctx, input.IdempotencyKey)
-	if err == nil {
-		return payment, nil
-	}
-
-	payment = &model.Payment{
+	payment := &model.Payment{
 		ID:             uuid.NewString(),
 		Amount:         input.Amount,
 		Currency:       input.Currency,
@@ -89,8 +84,25 @@ func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (
 		Payload:       *payment,
 	}
 
-	err = s.uow.WithinTx(ctx, func(ctx context.Context, r repository.Repositories) error {
-		err := r.Command.Save(ctx, &model.Command{
+	var resultPaymentID string
+
+	err := s.uow.WithinTx(ctx, func(ctx context.Context, r repository.Repositories) error {
+		paymentID, created, err := r.IdempotencyKey.Register(ctx, &model.IdempotencyKey{
+			ID:        input.IdempotencyKey,
+			PaymentID: payment.ID,
+		})
+
+		if err != nil {
+			return err
+		}
+
+		resultPaymentID = paymentID
+
+		if !created {
+			return nil
+		}
+
+		err = r.Command.Save(ctx, &model.Command{
 			ID:          uuid.NewString(),
 			CommandType: common.CommandCreatePayment,
 			Payload:     command,
@@ -120,10 +132,10 @@ func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		return nil, fmt.Errorf("%s: command creation: %w", op, err)
+		return "", fmt.Errorf("%s: command creation: %w", op, err)
 	}
 
-	return payment, nil
+	return resultPaymentID, nil
 }
 
 func (s *PaymentService) GetByID(ctx context.Context, id string) (*model.Payment, error) {

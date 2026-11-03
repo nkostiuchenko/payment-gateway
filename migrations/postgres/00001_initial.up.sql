@@ -21,3 +21,8 @@ CREATE TABLE outbox (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     processed_at    TIMESTAMPTZ
 );
+
+CREATE TABLE idempotency_keys (
+    id              UUID PRIMARY KEY,
+    payment_id      UUID NOT NULL
+);

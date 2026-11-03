@@ -36,7 +36,7 @@ import (
 
 type PaymentService interface {
 	GetByID(ctx context.Context, id string) (*model.Payment, error)
-	Create(ctx context.Context, input service.CreatePaymentInput) (*model.Payment, error)
+	Create(ctx context.Context, input service.CreatePaymentInput) (string, error)
 	Webhook(ctx context.Context, webhook service.WebhookInput) error
 }
 
@@ -139,7 +139,7 @@ func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 		idempotencyKey = uuid.NewString()
 	}
 
-	payment, err := s.paymentService.Create(ctx, service.CreatePaymentInput{
+	paymentID, err := s.paymentService.Create(ctx, service.CreatePaymentInput{
 		Amount:         *request.Amount,
 		Provider:       *request.Provider,
 		Currency:       *request.Currency,
@@ -164,7 +164,7 @@ func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(Response{PaymentID: payment.ID})
+	json.NewEncoder(w).Encode(Response{PaymentID: paymentID})
 }
 
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {

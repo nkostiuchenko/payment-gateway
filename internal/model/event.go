@@ -31,3 +31,8 @@ type PaymentProcessingSucceeded struct {
 type PaymentCreated struct {
 	Payment
 }
+
+type IdempotencyKey struct {
+	ID        string `json:"id"`
+	PaymentID string `json:"payment_id"`
+}
