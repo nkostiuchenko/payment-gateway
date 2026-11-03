@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
 )
 
@@ -18,7 +17,7 @@ func (r *CommandRepository) Save(ctx context.Context, command *model.Command) er
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
-	const commandQuery = `
+	const query = `
 	INSERT INTO processed_commands (id, command_type, payload, created_at)
 	VALUES ($1, $2, $3, $4)
 	ON CONFLICT (id) DO UPDATE 
@@ -30,7 +29,7 @@ func (r *CommandRepository) Save(ctx context.Context, command *model.Command) er
 
 	_, err := r.db.ExecContext(
 		ctx,
-		commandQuery,
+		query,
 		command.ID,
 		command.CommandType,
 		command.Payload,
@@ -39,23 +38,6 @@ func (r *CommandRepository) Save(ctx context.Context, command *model.Command) er
 
 	if err != nil {
 		return fmt.Errorf("%s: insert command: %w", op, err)
-	}
-
-	const outboxQuery = `
-	INSERT INTO outbox (id, topic, message)
-	VALUES ($1, $2, $3)
-	`
-
-	_, err = r.db.ExecContext(
-		ctx,
-		outboxQuery,
-		command.ID,
-		common.CommandsTopic,
-		command.Payload,
-	)
-
-	if err != nil {
-		return fmt.Errorf("%s: insert outbox: %w", op, err)
 	}
 
 	return nil

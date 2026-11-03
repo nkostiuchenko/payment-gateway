@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/nkostiuchenko/payment-gateway/internal/common"
 	"github.com/nkostiuchenko/payment-gateway/internal/model"
 )
 
@@ -18,7 +17,7 @@ func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 	ctx, span := tracer.Start(ctx, op)
 	defer span.End()
 
-	const eventQuery = `
+	const query = `
 	INSERT INTO payment_events (id, event_type, payment_id, payload, created_at)
 	VALUES ($1, $2, $3, $4, $5)
 	ON CONFLICT (id) DO UPDATE 
@@ -31,7 +30,7 @@ func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 
 	_, err := r.db.ExecContext(
 		ctx,
-		eventQuery,
+		query,
 		event.ID,
 		event.EventType,
 		event.PaymentID,
@@ -41,23 +40,6 @@ func (r *EventRepository) Save(ctx context.Context, event *model.Event) error {
 
 	if err != nil {
 		return fmt.Errorf("%s: insert event: %w", op, err)
-	}
-
-	const outboxQuery = `
-	INSERT INTO outbox (id, topic, message)
-	VALUES ($1, $2, $3)
-	`
-
-	_, err = r.db.ExecContext(
-		ctx,
-		outboxQuery,
-		event.ID,
-		common.EventsTopic,
-		event.Payload,
-	)
-
-	if err != nil {
-		return fmt.Errorf("%s: insert outbox: %w", op, err)
 	}
 
 	return nil

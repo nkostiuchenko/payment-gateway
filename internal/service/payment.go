@@ -90,12 +90,31 @@ func (s *PaymentService) Create(ctx context.Context, input CreatePaymentInput) (
 	}
 
 	err = s.uow.WithinTx(ctx, func(ctx context.Context, r repository.Repositories) error {
-		return r.Command.Save(ctx, &model.Command{
+		err := r.Command.Save(ctx, &model.Command{
 			ID:          uuid.NewString(),
 			CommandType: common.CommandCreatePayment,
 			Payload:     command,
 			CreatedAt:   time.Now(),
 		})
+
+		if err != nil {
+			return err
+		}
+
+		js, err := json.Marshal(command)
+		if err != nil {
+			return err
+		}
+
+		rawMessage := json.RawMessage(js)
+
+		err = r.Outbox.Save(ctx, &model.Outbox{
+			ID:      uuid.NewString(),
+			Topic:   common.CommandsTopic,
+			Message: &rawMessage,
+		})
+
+		return err
 	})
 
 	if err != nil {
@@ -167,13 +186,32 @@ func (s *PaymentService) Webhook(ctx context.Context, input WebhookInput) error 
 	}
 
 	err := s.uow.WithinTx(ctx, func(ctx context.Context, r repository.Repositories) error {
-		return r.Event.Save(ctx, &model.Event{
+		err := r.Event.Save(ctx, &model.Event{
 			ID:        uuid.NewString(),
 			EventType: eventType,
 			PaymentID: input.PaymentID,
 			Payload:   &event,
 			CreatedAt: time.Now(),
 		})
+
+		if err != nil {
+			return err
+		}
+
+		js, err := json.Marshal(event)
+		if err != nil {
+			return err
+		}
+
+		rawMessage := json.RawMessage(js)
+
+		err = r.Outbox.Save(ctx, &model.Outbox{
+			ID:      uuid.NewString(),
+			Topic:   common.EventsTopic,
+			Message: &rawMessage,
+		})
+
+		return err
 	})
 
 	if err != nil {

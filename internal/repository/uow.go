@@ -16,6 +16,7 @@ type QueryerExecer interface {
 type Repositories struct {
 	Command *CommandRepository
 	Event   *EventRepository
+	Outbox  *OutboxRepository
 }
 
 type UnitOfWork struct {
@@ -50,6 +51,7 @@ func (u *UnitOfWork) WithinTx(ctx context.Context, fn func(ctx context.Context, 
 	repos := Repositories{
 		Command: NewCommandRepository(tx),
 		Event:   NewEventRepository(tx),
+		Outbox:  NewOutboxRepository(tx),
 	}
 
 	if err = fn(ctx, repos); err != nil {

@@ -51,12 +51,33 @@ func PublishProcessingStarted(ctx context.Context, w *Worker, paymentID string) 
 		Payload:       model.PaymentProcessingStarted{PaymentID: paymentID},
 	}
 
-	err := w.eventRepository.Save(ctx, &model.Event{
-		ID:        uuid.NewString(),
-		EventType: common.EventProcessingStarted,
-		PaymentID: paymentID,
-		Payload:   event,
-		CreatedAt: time.Now(),
+	err := w.uow.WithinTx(ctx, func(ctx context.Context, r repository.Repositories) error {
+		err := r.Event.Save(ctx, &model.Event{
+			ID:        uuid.NewString(),
+			EventType: common.EventProcessingStarted,
+			PaymentID: paymentID,
+			Payload:   event,
+			CreatedAt: time.Now(),
+		})
+
+		if err != nil {
+			return err
+		}
+
+		js, err := json.Marshal(event)
+		if err != nil {
+			return err
+		}
+
+		rawMessage := json.RawMessage(js)
+
+		err = r.Outbox.Save(ctx, &model.Outbox{
+			ID:      uuid.NewString(),
+			Topic:   common.EventsTopic,
+			Message: &rawMessage,
+		})
+
+		return err
 	})
 
 	if err != nil {
@@ -78,12 +99,33 @@ func PublishProcessingFailed(ctx context.Context, w *Worker, paymentID string) e
 		Payload:       model.PaymentProcessingStarted{PaymentID: paymentID},
 	}
 
-	err := w.eventRepository.Save(ctx, &model.Event{
-		ID:        uuid.NewString(),
-		EventType: common.EventProcessingFailed,
-		PaymentID: paymentID,
-		Payload:   event,
-		CreatedAt: time.Now(),
+	err := w.uow.WithinTx(ctx, func(ctx context.Context, r repository.Repositories) error {
+		err := r.Event.Save(ctx, &model.Event{
+			ID:        uuid.NewString(),
+			EventType: common.EventProcessingFailed,
+			PaymentID: paymentID,
+			Payload:   event,
+			CreatedAt: time.Now(),
+		})
+
+		if err != nil {
+			return err
+		}
+
+		js, err := json.Marshal(event)
+		if err != nil {
+			return err
+		}
+
+		rawMessage := json.RawMessage(js)
+
+		err = r.Outbox.Save(ctx, &model.Outbox{
+			ID:      uuid.NewString(),
+			Topic:   common.EventsTopic,
+			Message: &rawMessage,
+		})
+
+		return err
 	})
 
 	if err != nil {
@@ -105,12 +147,30 @@ func PublishProcessingSucceeded(ctx context.Context, w *Worker, paymentID string
 		Payload:       model.PaymentProcessingSucceeded{PaymentID: paymentID},
 	}
 
-	err := w.eventRepository.Save(ctx, &model.Event{
-		ID:        uuid.NewString(),
-		EventType: common.EventProcessingSucceeded,
-		PaymentID: paymentID,
-		Payload:   event,
-		CreatedAt: time.Now(),
+	err := w.uow.WithinTx(ctx, func(ctx context.Context, r repository.Repositories) error {
+		err := r.Event.Save(ctx, &model.Event{
+			ID:        uuid.NewString(),
+			EventType: common.EventProcessingSucceeded,
+			PaymentID: paymentID,
+			Payload:   event,
+			CreatedAt: time.Now(),
+		})
+
+		if err != nil {
+			return err
+		}
+
+		js, err := json.Marshal(event)
+
+		rawMessage := json.RawMessage(js)
+
+		err = r.Outbox.Save(ctx, &model.Outbox{
+			ID:      uuid.NewString(),
+			Topic:   common.EventsTopic,
+			Message: &rawMessage,
+		})
+
+		return err
 	})
 
 	if err != nil {
@@ -132,12 +192,30 @@ func PublishPaymentCreated(ctx context.Context, w *Worker, payment model.Payment
 		Payload:       payment,
 	}
 
-	err := w.eventRepository.Save(ctx, &model.Event{
-		ID:        uuid.NewString(),
-		EventType: common.EventPaymentCreated,
-		PaymentID: payment.ID,
-		Payload:   event,
-		CreatedAt: time.Now(),
+	err := w.uow.WithinTx(ctx, func(ctx context.Context, r repository.Repositories) error {
+		err := r.Event.Save(ctx, &model.Event{
+			ID:        uuid.NewString(),
+			EventType: common.EventPaymentCreated,
+			PaymentID: payment.ID,
+			Payload:   event,
+			CreatedAt: time.Now(),
+		})
+
+		if err != nil {
+			return err
+		}
+
+		js, err := json.Marshal(event)
+
+		rawMessage := json.RawMessage(js)
+
+		err = r.Outbox.Save(ctx, &model.Outbox{
+			ID:      uuid.NewString(),
+			Topic:   common.EventsTopic,
+			Message: &rawMessage,
+		})
+
+		return err
 	})
 
 	if err != nil {
@@ -304,8 +382,7 @@ type Worker struct {
 	cfg               config.Config
 	logger            *slog.Logger
 	paymentRepository *repository.PaymentRepository
-	eventRepository   *repository.EventRepository
-	commandRepository *repository.CommandRepository
+	uow               *repository.UnitOfWork
 	paymentProviders  map[string]Provider
 	producer          sarama.SyncProducer
 	wg                *sync.WaitGroup
@@ -404,8 +481,8 @@ func run() error {
 	paymentsCollection := mongoDB.Collection(common.MongoPaymentsCollection)
 
 	paymentRepository := repository.NewPaymentRepository(paymentsCollection)
-	commandRepository := repository.NewCommandRepository(pgDB)
-	eventRepository := repository.NewEventRepository(pgDB)
+
+	uow := repository.NewUnitOfWork(pgDB, nil)
 
 	paymentProviders := map[string]Provider{"stripe": provider.NewStripeProvider(cfg)}
 
@@ -440,8 +517,7 @@ func run() error {
 		logger:            logger,
 		producer:          producer,
 		paymentRepository: paymentRepository,
-		commandRepository: commandRepository,
-		eventRepository:   eventRepository,
+		uow:               uow,
 		paymentProviders:  paymentProviders,
 	}
 
