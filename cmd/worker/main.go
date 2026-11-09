@@ -388,10 +388,10 @@ type Worker struct {
 	wg                *sync.WaitGroup
 }
 
-func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
+func (w *Worker) HandleCommandMessage(ctx context.Context, message *sarama.ConsumerMessage) error {
 	const op = "Worker.HandleCommandMessage"
 
-	ctx := otel.GetTextMapPropagator().Extract(context.Background(), telemetry.ConsumerCarrier{Message: message})
+	ctx = otel.GetTextMapPropagator().Extract(ctx, telemetry.ConsumerCarrier{Message: message})
 
 	ctx, span := tracer.Start(ctx, op, trace.WithSpanKind(trace.SpanKindConsumer))
 	defer span.End()
@@ -400,7 +400,7 @@ func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
 	if err := json.Unmarshal(message.Value, &command); err != nil {
 		w.logger.Error("malformed command", "error", err)
 		broker.PublishRaw(ctx, common.DLQTopic, w.producer, message.Value)
-		return
+		return nil
 	}
 
 	switch command.CommandType {
@@ -410,12 +410,14 @@ func (w *Worker) HandleCommandMessage(message *sarama.ConsumerMessage) {
 		w.logger.Error("unknown command type", "command_type", command.CommandType)
 		broker.PublishRaw(ctx, common.DLQTopic, w.producer, message.Value)
 	}
+
+	return nil
 }
 
-func (w *Worker) HandleEventMessage(message *sarama.ConsumerMessage) {
+func (w *Worker) HandleEventMessage(ctx context.Context, message *sarama.ConsumerMessage) error {
 	const op = "Worker.HandleEventMessage"
 
-	ctx := otel.GetTextMapPropagator().Extract(context.Background(), telemetry.ConsumerCarrier{Message: message})
+	ctx = otel.GetTextMapPropagator().Extract(ctx, telemetry.ConsumerCarrier{Message: message})
 
 	ctx, span := tracer.Start(ctx, op, trace.WithSpanKind(trace.SpanKindConsumer))
 	defer span.End()
@@ -424,7 +426,7 @@ func (w *Worker) HandleEventMessage(message *sarama.ConsumerMessage) {
 	if err := json.Unmarshal(message.Value, &event); err != nil {
 		w.logger.Error("malformed event", "error", err)
 		broker.PublishRaw(ctx, common.DLQTopic, w.producer, message.Value)
-		return
+		return nil
 	}
 
 	switch event.EventType {
@@ -441,6 +443,7 @@ func (w *Worker) HandleEventMessage(message *sarama.ConsumerMessage) {
 		broker.PublishRaw(ctx, common.DLQTopic, w.producer, message.Value)
 	}
 
+	return nil
 }
 
 func run() error {
@@ -494,21 +497,14 @@ func run() error {
 		return fmt.Errorf("kafka producer creation failed: %w", err)
 	}
 
-	consumer, err := sarama.NewConsumer([]string{cfg.KafkaURL}, config)
+	eventConsumerGroup, err := sarama.NewConsumerGroup([]string{cfg.KafkaURL}, common.EventsConsumerGroup, config)
 	if err != nil {
-		return fmt.Errorf("kafka consumer creation failed: %w", err)
+		return fmt.Errorf("kafka event consumer group creation failed: %w", err)
 	}
 
-	// FIXME: replace with consumer group
-	commandConsumer, err := consumer.ConsumePartition(common.CommandsTopic, 0, sarama.OffsetNewest)
+	commandConsumerGroup, err := sarama.NewConsumerGroup([]string{cfg.KafkaURL}, common.CommandsConsumerGroup, config)
 	if err != nil {
-		return fmt.Errorf("kafka command consumer creation failed: %w", err)
-	}
-
-	// FIXME: replace with consumer group
-	eventConsumer, err := consumer.ConsumePartition(common.EventsTopic, 0, sarama.OffsetNewest)
-	if err != nil {
-		return fmt.Errorf("kafka event consumer creation failed: %w", err)
+		return fmt.Errorf("kafka command consumer group creation failed: %w", err)
 	}
 
 	worker := Worker{
@@ -521,34 +517,42 @@ func run() error {
 		paymentProviders:  paymentProviders,
 	}
 
-loop:
-	for {
-		select {
-		case <-sig:
-			break loop
-		case message := <-commandConsumer.Messages():
-			worker.HandleCommandMessage(message)
-		case message := <-eventConsumer.Messages():
-			worker.HandleEventMessage(message)
+	eventHandler := broker.NewHandler(worker.HandleEventMessage)
+	commandHandler := broker.NewHandler(worker.HandleCommandMessage)
+
+	go func() {
+		for {
+			eventConsumerGroup.Consume(
+				context.Background(),
+				[]string{common.EventsTopic},
+				eventHandler,
+			)
 		}
-	}
+	}()
+
+	go func() {
+		for {
+			commandConsumerGroup.Consume(
+				context.Background(),
+				[]string{common.CommandsTopic},
+				commandHandler,
+			)
+		}
+	}()
+
+	<-sig
 
 	logger.Info("waiting for all messages be handled")
 	worker.wg.Wait()
 
-	logger.Info("closing event consumer")
-	if err := eventConsumer.Close(); err != nil {
-		return fmt.Errorf("event consumer close failed: %w", err)
+	logger.Info("closing command consumer group")
+	if err := commandConsumerGroup.Close(); err != nil {
+		return fmt.Errorf("command consumer group close failed: %w", err)
 	}
 
-	logger.Info("closing command consumer")
-	if err := commandConsumer.Close(); err != nil {
-		return fmt.Errorf("command consumer close failed: %w", err)
-	}
-
-	logger.Info("closing consumer")
-	if err := consumer.Close(); err != nil {
-		return fmt.Errorf("consumer close failed: %w", err)
+	logger.Info("closing event consumer group")
+	if err := eventConsumerGroup.Close(); err != nil {
+		return fmt.Errorf("event consumer group close failed: %w", err)
 	}
 
 	logger.Info("closing producer")
